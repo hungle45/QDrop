@@ -36,7 +36,7 @@ export const FRAME_INTERVALS = [
   { label: 'Slow', value: 5000 },
 ] as const
 
-export const DEFAULT_FRAME_INTERVAL = 3000
+export const DEFAULT_FRAME_INTERVAL = 800
 
 export function useSender(): UseSenderReturn {
   const [state, setState] = useState<SenderTransfer>({
@@ -53,8 +53,8 @@ export function useSender(): UseSenderReturn {
   const [displayCells, setDisplayCells] = useState<QrGridCell[]>([])
   const [density, setDensity] = useState<QrDensity>(1)
   const [frameInterval, setFrameIntervalState] = useState<number>(DEFAULT_FRAME_INTERVAL)
-  const [qrErrorLevel, setQrErrorLevel] = useState<QrErrorLevel>('M')
-  const [qrVersion, setQrVersion] = useState<number | undefined>(undefined)
+  const [qrErrorLevel, setQrErrorLevel] = useState<QrErrorLevel>('L')
+  const [qrVersion, setQrVersion] = useState<number | undefined>(20)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const currentIndexRef = useRef(0)
   const cyclesRef = useRef(0)

@@ -27,8 +27,8 @@ export const MANIFEST_QR_CONFIG: QrGenConfig = {
 
 /** Default config for data frames */
 export const DEFAULT_QR_CONFIG: QrGenConfig = {
-  errorCorrectionLevel: 'M',
-  version: undefined,
+  errorCorrectionLevel: 'L',
+  version: 20,
   width: 256,
   margin: 4,
 }
@@ -47,8 +47,6 @@ export const QR_VERSION_PRESETS = [
   { label: 'v20', value: 20 },
   { label: 'v25', value: 25 },
   { label: 'v30', value: 30 },
-  { label: 'v35', value: 35 },
-  { label: 'v40', value: 40 },
 ]
 
 /**
