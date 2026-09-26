@@ -14,7 +14,7 @@ export default defineConfig({
       '@': resolve(__dirname, './src'),
     },
   },
-  base: '/qdrop/',
+  base: '/QDrop/',
   test: {
     environment: 'happy-dom',
     setupFiles: [],
