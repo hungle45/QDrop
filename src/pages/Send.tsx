@@ -12,6 +12,8 @@ import type { Manifest } from '@/protocol'
 import { ThemeToggle } from '@/components/common/theme-toggle'
 import { QrRenderer, type QrDensity, type QrGridCell } from '@/qr/renderer'
 import { useSender, FRAME_INTERVALS } from '@/hooks/use-sender'
+import { QR_ERROR_LEVELS } from '@/qr/generator'
+import type { QrErrorLevel } from '@/qr/generator'
 
 function formatSize(bytes: number): string {
   if (bytes === 0) return '0 B'
@@ -30,6 +32,9 @@ export default function Send() {
     setDensity,
     frameInterval,
     setFrameInterval,
+    qrConfig,
+    setQrErrorLevel,
+    setQrVersion,
     selectFile,
     startTransmission,
     pauseTransmission,
@@ -94,6 +99,9 @@ export default function Send() {
             onDensityChange={setDensity}
             frameInterval={frameInterval}
             onFrameIntervalChange={setFrameInterval}
+            qrConfig={qrConfig}
+            onQrErrorLevelChange={setQrErrorLevel}
+            onQrVersionChange={setQrVersion}
           />
         )}
 
@@ -111,6 +119,7 @@ export default function Send() {
             onStop={stopTransmission}
             qrScale={qrScale}
             onQrScaleChange={setQrScale}
+            qrConfig={qrConfig}
           />
         )}
 
@@ -197,6 +206,9 @@ function PreparingView({
   onDensityChange,
   frameInterval,
   onFrameIntervalChange,
+  qrConfig,
+  onQrErrorLevelChange,
+  onQrVersionChange,
 }: {
   file: File
   manifest: Manifest | null
@@ -205,6 +217,9 @@ function PreparingView({
   onDensityChange: (d: QrDensity) => void
   frameInterval: number
   onFrameIntervalChange: (ms: number) => void
+  qrConfig: { errorCorrectionLevel: QrErrorLevel; version?: number }
+  onQrErrorLevelChange: (level: QrErrorLevel) => void
+  onQrVersionChange: (v: number | undefined) => void
 }) {
   return (
     <div className="space-y-6 pt-8">
@@ -243,6 +258,12 @@ function PreparingView({
             onDensityChange={onDensityChange}
           />
 
+          <QrConfigControl
+            config={qrConfig}
+            onErrorLevelChange={onQrErrorLevelChange}
+            onVersionChange={onQrVersionChange}
+          />
+
           <Button className="w-full gap-2" onClick={onStart}>
             <Play className="size-4" />
             Start Transmission
@@ -266,6 +287,7 @@ function TransmittingView({
   onStop,
   qrScale,
   onQrScaleChange,
+  qrConfig,
 }: {
   state: { totalFrames: number; cyclesCompleted: number; file: File | null }
   manifest: Manifest | null
@@ -279,6 +301,7 @@ function TransmittingView({
   onStop: () => void
   qrScale: number
   onQrScaleChange: (scale: number) => void
+  qrConfig: { errorCorrectionLevel: QrErrorLevel; version?: number }
 }) {
   return (
     <div className="space-y-4">
@@ -354,6 +377,10 @@ function TransmittingView({
             <span>QR: {density}×{density}</span>
             <span className="text-border">|</span>
             <span>{FRAME_INTERVALS.find(i => i.value === frameInterval)?.label ?? 'Normal'}</span>
+            <span className="text-border">|</span>
+            <span>EC-{qrConfig.errorCorrectionLevel}</span>
+            <span className="text-border">|</span>
+            <span>v{qrConfig.version ?? 'auto'}</span>
           </div>
           <Separator orientation="vertical" className="h-8" />
           <SpeedControl
@@ -505,6 +532,75 @@ function QrDensityControl({
           2 × 2
         </ToggleGroupItem>
       </ToggleGroup>
+    </div>
+  )
+}
+
+function QrConfigControl({
+  config,
+  onErrorLevelChange,
+  onVersionChange,
+}: {
+  config: { errorCorrectionLevel: QrErrorLevel; version?: number }
+  onErrorLevelChange: (level: QrErrorLevel) => void
+  onVersionChange: (v: number | undefined) => void
+}) {
+  const version = config.version ?? 0
+  const isAuto = config.version === undefined
+
+  return (
+    <div className="space-y-3">
+      <p className="text-sm font-medium text-foreground">QR Configuration</p>
+
+      <div className="space-y-2">
+        <p className="text-xs text-muted-foreground">Error Correction</p>
+        <ToggleGroup
+          type="single"
+          value={config.errorCorrectionLevel}
+          onValueChange={(v) => {
+            if (v) onErrorLevelChange(v as QrErrorLevel)
+          }}
+          className="flex gap-1"
+        >
+          {QR_ERROR_LEVELS.map((l) => (
+            <ToggleGroupItem key={l.value} value={l.value} size="sm" className="text-xs px-3">
+              {l.label}
+            </ToggleGroupItem>
+          ))}
+        </ToggleGroup>
+        <p className="text-[10px] text-muted-foreground">
+          {QR_ERROR_LEVELS.find((l) => l.value === config.errorCorrectionLevel)?.recovery} recovery
+        </p>
+      </div>
+
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <p className="text-xs text-muted-foreground">Version</p>
+          <div className="flex items-center gap-2">
+            <label className="flex items-center gap-1 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={isAuto}
+                onChange={(e) => onVersionChange(e.target.checked ? undefined : 30)}
+                className="size-3"
+              />
+              <span className="text-[10px] text-muted-foreground">Auto</span>
+            </label>
+          </div>
+        </div>
+        {!isAuto && (
+          <div className="flex items-center gap-3">
+            <Slider
+              value={[version]}
+              onValueChange={([v]) => onVersionChange(v)}
+              min={1}
+              max={40}
+              step={1}
+            />
+            <span className="text-xs text-muted-foreground font-mono w-8 text-right">v{version}</span>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

@@ -5,7 +5,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { type EncodedFrame, frameToQrData } from '@/protocol'
 import { prepareTransfer, type SenderTransfer, type SenderState } from '@/transfer/sender'
-import { generateQrBatch } from '@/qr/generator'
+import { generateQrBatch, DEFAULT_QR_CONFIG, type QrGenConfig, type QrErrorLevel } from '@/qr/generator'
 import { groupFramesForDisplay, type QrDensity, type QrGridCell } from '@/qr/renderer'
 
 export type { QrDensity }
@@ -17,6 +17,9 @@ interface UseSenderReturn {
   setDensity: (d: QrDensity) => void
   frameInterval: number
   setFrameInterval: (ms: number) => void
+  qrConfig: QrGenConfig
+  setQrErrorLevel: (level: QrErrorLevel) => void
+  setQrVersion: (v: number | undefined) => void
   selectFile: (file: File) => Promise<void>
   startTransmission: () => void
   pauseTransmission: () => void
@@ -48,6 +51,8 @@ export function useSender(): UseSenderReturn {
   const [displayCells, setDisplayCells] = useState<QrGridCell[]>([])
   const [density, setDensity] = useState<QrDensity>(1)
   const [frameInterval, setFrameIntervalState] = useState<number>(DEFAULT_FRAME_INTERVAL)
+  const [qrErrorLevel, setQrErrorLevel] = useState<QrErrorLevel>(DEFAULT_QR_CONFIG.errorCorrectionLevel)
+  const [qrVersion, setQrVersion] = useState<number | undefined>(DEFAULT_QR_CONFIG.version)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const currentIndexRef = useRef(0)
   const cyclesRef = useRef(0)
@@ -81,7 +86,12 @@ export function useSender(): UseSenderReturn {
 
     // Generate QR data URLs for the group
     const qrDataStrings = group.map((f) => frameToQrData(f.bytes))
-    const dataUrls = await generateQrBatch(qrDataStrings)
+    const dataUrls = await generateQrBatch(qrDataStrings, {
+      errorCorrectionLevel: qrErrorLevel,
+      version: qrVersion,
+      width: 256,
+      margin: 4,
+    })
 
     const cells: QrGridCell[] = group.map((frame, index) => ({
       frame,
@@ -89,7 +99,7 @@ export function useSender(): UseSenderReturn {
     }))
 
     setDisplayCells(cells)
-  }, [density])
+  }, [density, qrErrorLevel, qrVersion])
 
   const startTimer = useCallback(() => {
     clearTimer()
@@ -173,11 +183,21 @@ export function useSender(): UseSenderReturn {
   const setFrameInterval = useCallback((ms: number) => {
     setFrameIntervalState(ms)
     intervalMsRef.current = ms
-    // Restart timer if currently transmitting
     if (!pauseRef.current && intervalRef.current) {
       startTimer()
     }
   }, [startTimer])
+
+  const qrConfig: QrGenConfig = {
+    errorCorrectionLevel: qrErrorLevel,
+    version: qrVersion,
+    width: 256,
+    margin: 4,
+  }
+
+  const handleSetQrVersion = useCallback((v: number | undefined) => {
+    setQrVersion(v)
+  }, [])
 
   // Clean up on unmount
   useEffect(() => {
@@ -191,6 +211,9 @@ export function useSender(): UseSenderReturn {
     setDensity,
     frameInterval,
     setFrameInterval,
+    qrConfig,
+    setQrErrorLevel,
+    setQrVersion: handleSetQrVersion,
     selectFile,
     startTransmission,
     pauseTransmission,
