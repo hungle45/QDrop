@@ -118,16 +118,16 @@ export default function Send() {
         )}
 
         <Dialog open={!!previewCell} onOpenChange={(open) => !open && setPreviewCell(null)}>
-          <DialogContent className="max-w-sm sm:max-w-md">
+          <DialogContent className="max-w-[90vw] max-h-[90vh] w-fit h-fit">
             <DialogTitle className="sr-only">QR Code Preview</DialogTitle>
             {previewCell && (
-              <div className="flex flex-col items-center gap-2">
+              <div className="flex flex-col items-center gap-2 p-2">
                 <img
                   src={previewCell.dataUrl}
                   alt={`Frame ${previewCell.frame.number}`}
-                  className="w-full h-auto"
+                  className="max-w-[80vw] max-h-[75vh] w-auto h-auto object-contain"
                 />
-                <p className="text-xs text-muted-foreground font-mono">
+                <p className="text-sm text-muted-foreground font-mono">
                   Frame #{previewCell.frame.number}
                 </p>
               </div>
