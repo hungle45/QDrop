@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ArrowLeft, Upload, Play, Pause, Square, QrCode, Gauge } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -15,6 +15,7 @@ import { bytesToHex } from '@/protocol'
 import type { Manifest } from '@/protocol'
 import { ThemeToggle } from '@/components/common/theme-toggle'
 import { QrRenderer, type QrDensity, type QrGridCell } from '@/qr/renderer'
+import { Slider } from '@/components/ui/slider'
 import { useSender, FRAME_INTERVALS } from '@/hooks/use-sender'
 
 function formatSize(bytes: number): string {
@@ -44,6 +45,16 @@ export default function Send() {
   const [dragOver, setDragOver] = useState(false)
   const [fileInputKey, setFileInputKey] = useState(0)
   const [previewCell, setPreviewCell] = useState<QrGridCell | null>(null)
+  const [previewScale, setPreviewScale] = useState(100)
+
+  // Keep preview cell in sync when display cells update during transmission
+  useEffect(() => {
+    if (!previewCell) return
+    const updated = displayCells.find((c) => c.frame.number === previewCell.frame.number)
+    if (updated && updated.dataUrl !== previewCell.dataUrl) {
+      setPreviewCell(updated)
+    }
+  }, [displayCells, previewCell])
 
   const handleFile = async (file: File) => {
     await selectFile(file)
@@ -113,21 +124,38 @@ export default function Send() {
             onPause={pauseTransmission}
             onResume={resumeTransmission}
             onStop={stopTransmission}
-            onCellClick={setPreviewCell}
+            onCellClick={(cell) => {
+              setPreviewCell(cell)
+              setPreviewScale(100)
+            }}
           />
         )}
 
         <Dialog open={!!previewCell} onOpenChange={(open) => !open && setPreviewCell(null)}>
-          <DialogContent className="max-w-[90vw] max-h-[90vh] w-fit h-fit">
+          <DialogContent className="max-w-[95vw] max-h-[95vh] w-fit h-fit">
             <DialogTitle className="sr-only">QR Code Preview</DialogTitle>
             {previewCell && (
-              <div className="flex flex-col items-center gap-2 p-2">
-                <img
-                  src={previewCell.dataUrl}
-                  alt={`Frame ${previewCell.frame.number}`}
-                  className="max-w-[80vw] max-h-[75vh] w-auto h-auto object-contain"
-                />
-                <p className="text-sm text-muted-foreground font-mono">
+              <div className="flex flex-col items-center gap-2">
+                <div className="overflow-auto flex items-center justify-center" style={{ width: `${previewScale}%`, maxWidth: '85vw' }}>
+                  <img
+                    src={previewCell.dataUrl}
+                    alt={`Frame ${previewCell.frame.number}`}
+                    className="w-full h-auto"
+                  />
+                </div>
+                <div className="flex items-center gap-3 w-full max-w-xs">
+                  <span className="text-xs text-muted-foreground shrink-0">
+                    {previewScale}%
+                  </span>
+                  <Slider
+                    value={[previewScale]}
+                    onValueChange={(value) => setPreviewScale(value[0])}
+                    min={25}
+                    max={200}
+                    step={5}
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground font-mono">
                   Frame #{previewCell.frame.number}
                 </p>
               </div>
