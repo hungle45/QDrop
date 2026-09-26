@@ -188,15 +188,20 @@ export function useSender(): UseSenderReturn {
     }
   }, [buildUserConfig, regenerateFrames])
 
-  // When QR config changes, regenerate frames if a file is selected
-  // but not during active transmission
-  const [applyingConfig, setApplyingConfig] = useState(false)
+  // Track previous config to detect real changes
+  const prevConfigRef = useRef({ errorLevel: qrErrorLevel, version: qrVersion })
+
+  // When QR config changes after file is ready, regenerate frames
   useEffect(() => {
-    if (!selectedFileRef.current || state.state === 'transmitting' || state.state === 'paused') return
-    if (!applyingConfig) {
-      setApplyingConfig(true)
-      return
-    }
+    const prev = prevConfigRef.current
+    prevConfigRef.current = { errorLevel: qrErrorLevel, version: qrVersion }
+
+    // Only regenerate if config actually changed
+    if (prev.errorLevel === qrErrorLevel && prev.version === qrVersion) return
+
+    // Skip during transmission or if no file is ready
+    if (!selectedFileRef.current || state.state === 'idle' || state.state === 'preparing') return
+    if (state.state === 'transmitting' || state.state === 'paused') return
 
     const doRegen = async () => {
       const config = buildUserConfig()
@@ -217,12 +222,11 @@ export function useSender(): UseSenderReturn {
           error: null,
         }))
       } catch (err) {
-        // Silently fail — keep old frames
         setState((prev) => ({ ...prev, state: 'ready' as SenderState }))
       }
     }
     doRegen()
-  }, [qrErrorLevel, qrVersion, buildUserConfig, regenerateFrames]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [qrErrorLevel, qrVersion, buildUserConfig, regenerateFrames, state.state])
 
   const startTransmission = useCallback(() => {
     if (state.frames.length === 0) return
