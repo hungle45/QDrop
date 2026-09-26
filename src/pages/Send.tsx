@@ -6,6 +6,11 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { bytesToHex } from '@/protocol'
 import type { Manifest } from '@/protocol'
 import { ThemeToggle } from '@/components/common/theme-toggle'
@@ -38,6 +43,7 @@ export default function Send() {
 
   const [dragOver, setDragOver] = useState(false)
   const [fileInputKey, setFileInputKey] = useState(0)
+  const [previewCell, setPreviewCell] = useState<QrGridCell | null>(null)
 
   const handleFile = async (file: File) => {
     await selectFile(file)
@@ -107,8 +113,27 @@ export default function Send() {
             onPause={pauseTransmission}
             onResume={resumeTransmission}
             onStop={stopTransmission}
+            onCellClick={setPreviewCell}
           />
         )}
+
+        <Dialog open={!!previewCell} onOpenChange={(open) => !open && setPreviewCell(null)}>
+          <DialogContent className="max-w-sm sm:max-w-md">
+            <DialogTitle className="sr-only">QR Code Preview</DialogTitle>
+            {previewCell && (
+              <div className="flex flex-col items-center gap-2">
+                <img
+                  src={previewCell.dataUrl}
+                  alt={`Frame ${previewCell.frame.number}`}
+                  className="w-full h-auto"
+                />
+                <p className="text-xs text-muted-foreground font-mono">
+                  Frame #{previewCell.frame.number}
+                </p>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
 
         {state.state === 'stopped' && (
           <StoppedView
@@ -260,6 +285,7 @@ function TransmittingView({
   onPause,
   onResume,
   onStop,
+  onCellClick,
 }: {
   state: { totalFrames: number; cyclesCompleted: number; file: File | null }
   manifest: Manifest | null
@@ -271,6 +297,7 @@ function TransmittingView({
   onPause: () => void
   onResume: () => void
   onStop: () => void
+  onCellClick: (cell: QrGridCell) => void
 }) {
   return (
     <div className="space-y-4">
@@ -307,6 +334,7 @@ function TransmittingView({
               cells={displayCells}
               density={density}
               className="max-w-sm mx-auto"
+              onCellClick={onCellClick}
             />
           ) : (
             <div className="flex items-center justify-center h-48 text-muted-foreground text-sm">

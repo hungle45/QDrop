@@ -8,6 +8,7 @@ import { Progress } from '@/components/ui/progress'
 import { Separator } from '@/components/ui/separator'
 import { ThemeToggle } from '@/components/common/theme-toggle'
 import { useReceiver } from '@/hooks/use-receiver'
+import type { Manifest } from '@/protocol'
 import type { ReceiverTransfer } from '@/transfer/receiver'
 
 function formatSize(bytes: number): string {
@@ -148,57 +149,80 @@ function ScanningView({
         </div>
       </Card>
 
+      <Card>
+        <CardContent className="pt-4 pb-4 space-y-3">
+          {state.manifest ? (
+            <>
+              <div className="flex items-center gap-3">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-foreground truncate">
+                    {state.manifest.filename}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {formatSize(state.manifest.fileSize)} &middot; {state.totalFrames} frames
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <div className="flex justify-between text-xs">
+                  <span className="text-muted-foreground">
+                    {state.receivedFrames.size} / {state.totalFrames} frames
+                  </span>
+                  <span className="font-mono text-foreground">{progress}%</span>
+                </div>
+                <Progress value={progress} />
+              </div>
+
+              <Separator />
+
+              <div className="grid grid-cols-3 gap-2 text-xs">
+                <div>
+                  <span className="text-muted-foreground">Received</span>
+                  <p className="font-mono text-foreground">{state.receivedFrames.size}</p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Duplicates</span>
+                  <p className="font-mono text-foreground">{state.duplicateCount}</p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Invalid</span>
+                  <p className="font-mono text-foreground">{state.invalidCount}</p>
+                </div>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="flex items-center gap-2">
+                <ScanLine className="size-4 animate-pulse text-primary" />
+                <p className="text-xs text-muted-foreground">
+                  Scanning for QR codes...
+                </p>
+              </div>
+              <Separator />
+              <div className="grid grid-cols-3 gap-2 text-xs">
+                <div>
+                  <span className="text-muted-foreground">Received</span>
+                  <p className="font-mono text-foreground">0</p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Duplicates</span>
+                  <p className="font-mono text-foreground">0</p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Invalid</span>
+                  <p className="font-mono text-foreground">0</p>
+                </div>
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
+
       {state.manifest && !isScanning && (
         <Card>
-          <CardContent className="pt-4 pb-4 space-y-3">
-            <div className="flex items-center gap-3">
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-foreground truncate">
-                  {state.manifest.filename}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  {formatSize(state.manifest.fileSize)}
-                </p>
-              </div>
-            </div>
-
-            <div className="space-y-1">
-              <div className="flex justify-between text-xs">
-                <span className="text-muted-foreground">
-                  {state.receivedFrames.size} / {state.totalFrames} frames
-                </span>
-                <span className="font-mono text-foreground">{progress}%</span>
-              </div>
-              <Progress value={progress} />
-            </div>
-
-            <Separator />
-
-            <div className="grid grid-cols-3 gap-2 text-xs">
-              <div>
-                <span className="text-muted-foreground">Received</span>
-                <p className="font-mono text-foreground">{state.receivedFrames.size}</p>
-              </div>
-              <div>
-                <span className="text-muted-foreground">Duplicates</span>
-                <p className="font-mono text-foreground">{state.duplicateCount}</p>
-              </div>
-              <div>
-                <span className="text-muted-foreground">Invalid</span>
-                <p className="font-mono text-foreground">{state.invalidCount}</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {isScanning && (
-        <Card>
-          <CardContent className="pt-4 pb-4 flex items-center justify-center gap-2">
-            <ScanLine className="size-4 animate-pulse text-primary" />
-            <p className="text-xs text-muted-foreground">
-              Scanning for QR codes...
-            </p>
+          <CardContent className="pt-3 pb-3">
+            <ManifestDetailsReceiver manifest={state.manifest} />
           </CardContent>
         </Card>
       )}
@@ -271,6 +295,37 @@ function FailedView({ error, onRetry }: { error: string | null; onRetry: () => v
           </Button>
         </CardContent>
       </Card>
+    </div>
+  )
+}
+
+function ManifestDetailsReceiver({ manifest }: { manifest: Manifest }) {
+  const transferIdHex = Array.from(manifest.transferId)
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('')
+  const hashHex = Array.from(manifest.fileHash)
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('')
+
+  return (
+    <div className="space-y-2">
+      <p className="text-xs font-medium text-foreground uppercase tracking-wider">
+        Manifest
+      </p>
+      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+        <span className="text-muted-foreground">Transfer ID</span>
+        <span className="font-mono text-foreground truncate" title={transferIdHex}>
+          {transferIdHex.slice(0, 16)}...
+        </span>
+        <span className="text-muted-foreground">Frames</span>
+        <span className="font-mono text-foreground">{manifest.totalFrames}</span>
+        <span className="text-muted-foreground">Protocol</span>
+        <span className="font-mono text-foreground">v{manifest.protocolVersion}</span>
+        <span className="text-muted-foreground">File Hash</span>
+        <span className="font-mono text-foreground truncate" title={hashHex}>
+          {hashHex.slice(0, 16)}...
+        </span>
+      </div>
     </div>
   )
 }
