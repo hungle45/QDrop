@@ -81,30 +81,17 @@ export function useReceiver(): UseReceiverReturn {
         const updated = new Map(prev.receivedFrames)
         updated.set(decoded.frame.header.frameNumber, decoded.frame.payload)
 
-        // If we already have a manifest, check completion
-        if (prev.manifest) {
-          const isComplete = isTransferComplete(updated, prev.totalFrames)
-          return {
-            ...prev,
-            receivedFrames: updated,
-            state: isComplete ? 'reconstructing' as ReceiverState : 'receiving' as ReceiverState,
-            frameLog: addToLog(prev.frameLog, {
-              frameNumber: decoded.frame.header.frameNumber,
-              type: 'new',
-              message: `scanned frame #${decoded.frame.header.frameNumber}` + (isComplete ? ' — completed!' : ''),
-              time: Date.now(),
-            }),
-          }
-        }
+        const haveManifest = !!prev.manifest
+        const isComplete = haveManifest && isTransferComplete(updated, prev.totalFrames)
 
-        // No manifest yet — still collect frames
         return {
           ...prev,
           receivedFrames: updated,
+          state: isComplete ? 'reconstructing' as ReceiverState : (haveManifest ? 'receiving' as ReceiverState : prev.state),
           frameLog: addToLog(prev.frameLog, {
             frameNumber: decoded.frame.header.frameNumber,
             type: 'new',
-            message: `scanned frame #${decoded.frame.header.frameNumber} (waiting for manifest...)`,
+            message: `scanned frame #${decoded.frame.header.frameNumber}` + (isComplete ? ' — completed!' : ''),
             time: Date.now(),
           }),
         }
