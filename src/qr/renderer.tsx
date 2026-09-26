@@ -23,11 +23,9 @@ interface QrRendererProps {
   density: QrDensity
   /** Optional className override */
   className?: string
-  /** Called when a cell is clicked */
-  onCellClick?: (cell: QrGridCell) => void
 }
 
-export function QrRenderer({ cells, density, className, onCellClick }: QrRendererProps) {
+export function QrRenderer({ cells, density, className }: QrRendererProps) {
   const gridCols = density === 2 ? 'grid-cols-2' : 'grid-cols-1'
 
   return (
@@ -35,11 +33,7 @@ export function QrRenderer({ cells, density, className, onCellClick }: QrRendere
       {cells.map((cell) => (
         <div
           key={cell.frame.number}
-          className={cn(
-            'flex flex-col items-center gap-1',
-            onCellClick && 'cursor-pointer'
-          )}
-          onClick={() => onCellClick?.(cell)}
+          className="flex flex-col items-center gap-1"
         >
           <img
             src={cell.dataUrl}

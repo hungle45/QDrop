@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ArrowLeft, Upload, Play, Pause, Square, QrCode, Gauge } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -6,16 +6,11 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
-import {
-  Dialog,
-  DialogContent,
-  DialogTitle,
-} from '@/components/ui/dialog'
+import { Slider } from '@/components/ui/slider'
 import { bytesToHex } from '@/protocol'
 import type { Manifest } from '@/protocol'
 import { ThemeToggle } from '@/components/common/theme-toggle'
 import { QrRenderer, type QrDensity, type QrGridCell } from '@/qr/renderer'
-import { Slider } from '@/components/ui/slider'
 import { useSender, FRAME_INTERVALS } from '@/hooks/use-sender'
 
 function formatSize(bytes: number): string {
@@ -44,17 +39,7 @@ export default function Send() {
 
   const [dragOver, setDragOver] = useState(false)
   const [fileInputKey, setFileInputKey] = useState(0)
-  const [previewCell, setPreviewCell] = useState<QrGridCell | null>(null)
-  const [previewScale, setPreviewScale] = useState(100)
-
-  // Keep preview cell in sync when display cells update during transmission
-  useEffect(() => {
-    if (!previewCell) return
-    const updated = displayCells.find((c) => c.frame.number === previewCell.frame.number)
-    if (updated && updated.dataUrl !== previewCell.dataUrl) {
-      setPreviewCell(updated)
-    }
-  }, [displayCells, previewCell])
+  const [qrScale, setQrScale] = useState(100)
 
   const handleFile = async (file: File) => {
     await selectFile(file)
@@ -124,44 +109,10 @@ export default function Send() {
             onPause={pauseTransmission}
             onResume={resumeTransmission}
             onStop={stopTransmission}
-            onCellClick={(cell) => {
-              setPreviewCell(cell)
-              setPreviewScale(100)
-            }}
+            qrScale={qrScale}
+            onQrScaleChange={setQrScale}
           />
         )}
-
-        <Dialog open={!!previewCell} onOpenChange={(open) => !open && setPreviewCell(null)}>
-          <DialogContent className="max-w-[95vw] max-h-[95vh] w-fit h-fit">
-            <DialogTitle className="sr-only">QR Code Preview</DialogTitle>
-            {previewCell && (
-              <div className="flex flex-col items-center gap-2">
-                <div className="overflow-auto flex items-center justify-center" style={{ width: `${previewScale}%`, maxWidth: '85vw' }}>
-                  <img
-                    src={previewCell.dataUrl}
-                    alt={`Frame ${previewCell.frame.number}`}
-                    className="w-full h-auto"
-                  />
-                </div>
-                <div className="flex items-center gap-3 w-full max-w-xs">
-                  <span className="text-xs text-muted-foreground shrink-0">
-                    {previewScale}%
-                  </span>
-                  <Slider
-                    value={[previewScale]}
-                    onValueChange={(value) => setPreviewScale(value[0])}
-                    min={25}
-                    max={200}
-                    step={5}
-                  />
-                </div>
-                <p className="text-xs text-muted-foreground font-mono">
-                  Frame #{previewCell.frame.number}
-                </p>
-              </div>
-            )}
-          </DialogContent>
-        </Dialog>
 
         {state.state === 'stopped' && (
           <StoppedView
@@ -313,7 +264,8 @@ function TransmittingView({
   onPause,
   onResume,
   onStop,
-  onCellClick,
+  qrScale,
+  onQrScaleChange,
 }: {
   state: { totalFrames: number; cyclesCompleted: number; file: File | null }
   manifest: Manifest | null
@@ -325,7 +277,8 @@ function TransmittingView({
   onPause: () => void
   onResume: () => void
   onStop: () => void
-  onCellClick: (cell: QrGridCell) => void
+  qrScale: number
+  onQrScaleChange: (scale: number) => void
 }) {
   return (
     <div className="space-y-4">
@@ -356,20 +309,40 @@ function TransmittingView({
       )}
 
       <Card>
-        <CardContent className="pt-6 pb-6">
+        <CardContent className="pt-6 pb-6 space-y-4">
           {displayCells.length > 0 ? (
-            <QrRenderer
-              cells={displayCells}
-              density={density}
-              className="max-w-sm mx-auto"
-              onCellClick={onCellClick}
-            />
+            <>
+              <div
+                className="mx-auto transition-all duration-200"
+                style={{
+                  maxWidth: `${Math.max(25, qrScale)}%`,
+                  width: '100%',
+                }}
+              >
+                <QrRenderer
+                  cells={displayCells}
+                  density={density}
+                />
+              </div>
+              <div className="flex items-center gap-3 max-w-xs mx-auto">
+                <span className="text-xs text-muted-foreground shrink-0 w-8 text-right">
+                  {qrScale}%
+                </span>
+                <Slider
+                  value={[qrScale]}
+                  onValueChange={(value) => onQrScaleChange(value[0])}
+                  min={25}
+                  max={100}
+                  step={5}
+                />
+              </div>
+            </>
           ) : (
             <div className="flex items-center justify-center h-48 text-muted-foreground text-sm">
               Generating QR codes...
             </div>
           )}
-          <p className="text-center text-xs text-muted-foreground mt-2">
+          <p className="text-center text-xs text-muted-foreground">
             Cycle {state.cyclesCompleted + 1}
           </p>
         </CardContent>
