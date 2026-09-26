@@ -62,6 +62,7 @@ export function useSender(): UseSenderReturn {
   const pauseRef = useRef(false)
   const intervalMsRef = useRef(DEFAULT_FRAME_INTERVAL)
   const selectedFileRef = useRef<File | null>(null)
+  const generatingRef = useRef(false)
 
   const buildUserConfig = useCallback((): QrGenConfig => ({
     errorCorrectionLevel: qrErrorLevel,
@@ -103,38 +104,49 @@ export function useSender(): UseSenderReturn {
   }, [])
 
   const advanceFrames = useCallback(async () => {
+    if (generatingRef.current) return // already generating
     const frames = framesRef.current
     if (frames.length === 0) return
 
-    const { group, nextIndex, wrapped } = groupFramesForDisplay(
-      frames,
-      density,
-      currentIndexRef.current,
-    )
+    generatingRef.current = true
+    try {
+      const { group, nextIndex, wrapped } = groupFramesForDisplay(
+        frames,
+        density,
+        currentIndexRef.current,
+      )
 
-    currentIndexRef.current = nextIndex
+      currentIndexRef.current = nextIndex
 
-    if (wrapped) {
-      cyclesRef.current++
-      setState((prev) => ({ ...prev, cyclesCompleted: cyclesRef.current }))
+      if (wrapped) {
+        cyclesRef.current++
+        setState((prev) => ({ ...prev, cyclesCompleted: cyclesRef.current }))
+      }
+
+      // Manifest frames use MANIFEST_QR_CONFIG, data frames use user config
+      const userConfig = buildUserConfig()
+
+      const dataUrls = await Promise.all(
+        group.map(async (f) => {
+          const qrData = frameToQrData(f.bytes)
+          const baseConfig = f.isManifest ? MANIFEST_QR_CONFIG : userConfig
+          // Scale pixel width for higher versions so modules stay readable (~3px min)
+          const modules = (baseConfig.version ?? 22) * 4 + 17
+          const minWidth = Math.min(Math.max(modules * 3, 256), 600)
+          const renderConfig = { ...baseConfig, width: Math.max(baseConfig.width, minWidth) }
+          return generateQrDataUrl(qrData, renderConfig)
+        }),
+      )
+
+      const cells: QrGridCell[] = group.map((frame, index) => ({
+        frame,
+        dataUrl: dataUrls[index],
+      }))
+
+      setDisplayCells(cells)
+    } finally {
+      generatingRef.current = false
     }
-
-    // Manifest frames use MANIFEST_QR_CONFIG, data frames use user config
-    const userConfig = buildUserConfig()
-
-    const dataUrls = await Promise.all(
-      group.map(async (f) => {
-        const qrData = frameToQrData(f.bytes)
-        return generateQrDataUrl(qrData, f.isManifest ? MANIFEST_QR_CONFIG : userConfig)
-      }),
-    )
-
-    const cells: QrGridCell[] = group.map((frame, index) => ({
-      frame,
-      dataUrl: dataUrls[index],
-    }))
-
-    setDisplayCells(cells)
   }, [density, buildUserConfig])
 
   const startTimer = useCallback(() => {
