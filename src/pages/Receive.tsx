@@ -1,0 +1,270 @@
+import { useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { ArrowLeft, Camera, ScanLine, Download, RotateCcw, CheckCircle2, XCircle, LoaderCircle } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { Progress } from '@/components/ui/progress'
+import { Separator } from '@/components/ui/separator'
+import { ThemeToggle } from '@/components/common/theme-toggle'
+import { useReceiver } from '@/hooks/use-receiver'
+import type { ReceiverTransfer } from '@/transfer/receiver'
+
+function formatSize(bytes: number): string {
+  if (bytes === 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB']
+  const i = Math.floor(Math.log(bytes) / Math.log(1024))
+  const size = bytes / Math.pow(1024, i)
+  return `${size.toFixed(i === 0 ? 0 : 1)} ${units[i]}`
+}
+
+export default function Receive() {
+  const navigate = useNavigate()
+  const { state, videoRef, startReceiving, stopReceiving, retry } = useReceiver()
+
+  return (
+    <div className="min-h-screen flex flex-col">
+      <header className="flex items-center gap-2 px-4 h-14 border-b border-border/50">
+        <Button variant="ghost" size="icon" onClick={() => navigate('/')}>
+          <ArrowLeft className="size-4" />
+        </Button>
+        <span className="text-sm font-medium text-foreground">Receive</span>
+        <div className="flex-1" />
+        {(state.state === 'scanning' || state.state === 'receiving') && (
+          <Button variant="ghost" size="sm" onClick={stopReceiving}>
+            Stop
+          </Button>
+        )}
+        <ThemeToggle />
+      </header>
+
+      <div className="flex-1 p-4 sm:p-6 lg:p-8 max-w-3xl mx-auto w-full">
+        {state.state === 'idle' && <IdleView onStart={startReceiving} />}
+
+        {(state.state === 'camera_permission') && (
+          <LoadingView message="Requesting camera permission..." />
+        )}
+
+        {(state.state === 'scanning' || state.state === 'receiving') && (
+          <ScanningView state={state} videoRef={videoRef} />
+        )}
+
+        {(state.state === 'reconstructing' || state.state === 'verifying') && (
+          <LoadingView message={
+            state.state === 'reconstructing'
+              ? 'Reconstructing file...'
+              : 'Verifying file integrity...'
+          } />
+        )}
+
+        {state.state === 'complete' && <CompleteView state={state} />}
+
+        {state.state === 'failed' && <FailedView error={state.error} onRetry={retry} />}
+      </div>
+    </div>
+  )
+}
+
+function IdleView({ onStart }: { onStart: () => void }) {
+  return (
+    <div className="flex-1 flex items-center justify-center">
+      <Card className="w-full max-w-md">
+        <CardContent className="pt-16 pb-16 flex flex-col items-center gap-4">
+          <div className="size-12 rounded-full bg-secondary flex items-center justify-center">
+            <Camera className="size-5 text-muted-foreground" />
+          </div>
+          <div className="text-center space-y-1">
+            <p className="text-sm font-medium text-foreground">
+              Ready to receive
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Point your camera at a sender's QR codes
+            </p>
+          </div>
+          <Button className="gap-2" onClick={onStart}>
+            <ScanLine className="size-4" />
+            Start Receiving
+          </Button>
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
+function LoadingView({ message }: { message: string }) {
+  return (
+    <div className="flex-1 flex items-center justify-center">
+      <Card className="w-full max-w-sm">
+        <CardContent className="pt-12 pb-12 flex flex-col items-center gap-4">
+          <LoaderCircle className="size-8 animate-spin text-muted-foreground" />
+          <p className="text-sm text-muted-foreground">{message}</p>
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
+function ScanningView({
+  state,
+  videoRef,
+}: {
+  state: ReceiverTransfer
+  videoRef: React.RefObject<HTMLVideoElement | null>
+}) {
+  const progress = state.totalFrames > 0
+    ? Math.round((state.receivedFrames.size / state.totalFrames) * 100)
+    : 0
+
+  const isScanning = state.state === 'scanning'
+
+  return (
+    <div className="space-y-4">
+      <Card className="overflow-hidden">
+        <div className="aspect-video bg-black relative">
+          <video
+            ref={videoRef}
+            className="w-full h-full object-cover"
+            playsInline
+            muted
+          />
+          {isScanning && (
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <div className="size-32 border-2 border-primary/40 rounded-lg" />
+            </div>
+          )}
+          {!isScanning && (
+            <div className="absolute inset-0 flex items-center justify-center">
+              <Badge variant="default">
+                Receiving...
+              </Badge>
+            </div>
+          )}
+        </div>
+      </Card>
+
+      {state.manifest && !isScanning && (
+        <Card>
+          <CardContent className="pt-4 pb-4 space-y-3">
+            <div className="flex items-center gap-3">
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-foreground truncate">
+                  {state.manifest.filename}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {formatSize(state.manifest.fileSize)}
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <div className="flex justify-between text-xs">
+                <span className="text-muted-foreground">
+                  {state.receivedFrames.size} / {state.totalFrames} frames
+                </span>
+                <span className="font-mono text-foreground">{progress}%</span>
+              </div>
+              <Progress value={progress} />
+            </div>
+
+            <Separator />
+
+            <div className="grid grid-cols-3 gap-2 text-xs">
+              <div>
+                <span className="text-muted-foreground">Received</span>
+                <p className="font-mono text-foreground">{state.receivedFrames.size}</p>
+              </div>
+              <div>
+                <span className="text-muted-foreground">Duplicates</span>
+                <p className="font-mono text-foreground">{state.duplicateCount}</p>
+              </div>
+              <div>
+                <span className="text-muted-foreground">Invalid</span>
+                <p className="font-mono text-foreground">{state.invalidCount}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {isScanning && (
+        <Card>
+          <CardContent className="pt-4 pb-4 flex items-center justify-center gap-2">
+            <ScanLine className="size-4 animate-pulse text-primary" />
+            <p className="text-xs text-muted-foreground">
+              Scanning for QR codes...
+            </p>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  )
+}
+
+function CompleteView({ state }: { state: ReceiverTransfer }) {
+  const handleDownload = useCallback(() => {
+    if (!state.blob || !state.manifest) return
+    const url = URL.createObjectURL(state.blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = state.manifest.filename
+    a.click()
+    URL.revokeObjectURL(url)
+  }, [state.blob, state.manifest])
+
+  return (
+    <div className="flex-1 flex items-center justify-center">
+      <Card className="w-full max-w-md">
+        <CardContent className="pt-10 pb-10 flex flex-col items-center gap-4">
+          <div className="size-12 rounded-full bg-green-500/10 flex items-center justify-center">
+            <CheckCircle2 className="size-6 text-green-500" />
+          </div>
+          <div className="text-center space-y-1">
+            <p className="text-lg font-medium text-foreground">
+              Transfer Complete
+            </p>
+            {state.manifest && (
+              <>
+                <p className="text-sm font-medium text-foreground truncate max-w-full">
+                  {state.manifest.filename}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {formatSize(state.manifest.fileSize)}
+                </p>
+              </>
+            )}
+          </div>
+          <Button className="gap-2 mt-2" onClick={handleDownload}>
+            <Download className="size-4" />
+            Download File
+          </Button>
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
+function FailedView({ error, onRetry }: { error: string | null; onRetry: () => void }) {
+  return (
+    <div className="flex-1 flex items-center justify-center">
+      <Card className="w-full max-w-md">
+        <CardContent className="pt-10 pb-10 flex flex-col items-center gap-4">
+          <div className="size-12 rounded-full bg-red-500/10 flex items-center justify-center">
+            <XCircle className="size-6 text-red-500" />
+          </div>
+          <div className="text-center space-y-1">
+            <p className="text-lg font-medium text-foreground">
+              Verification Failed
+            </p>
+            <p className="text-xs text-muted-foreground max-w-xs">
+              {error || 'An error occurred during transfer.'}
+            </p>
+          </div>
+          <Button variant="outline" className="gap-2" onClick={onRetry}>
+            <RotateCcw className="size-4" />
+            Retry
+          </Button>
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
