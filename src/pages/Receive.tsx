@@ -119,7 +119,7 @@ function ScanningView({
   return (
     <div className="space-y-4">
       <Card className="overflow-hidden">
-        <div className="aspect-video bg-black relative overflow-hidden">
+        <div className="aspect-square bg-black relative overflow-hidden w-full max-w-sm mx-auto">
           <video
             ref={videoRef}
             className="w-full h-full object-cover scale-125"
