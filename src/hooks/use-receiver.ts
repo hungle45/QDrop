@@ -40,6 +40,7 @@ export function useReceiver(): UseReceiverReturn {
         frameLog: addToLog(prev.frameLog, {
           frameNumber: -1,
           type: 'invalid',
+          message: 'invalid QR data — CRC mismatch or bad format',
           time: Date.now(),
         }),
       }))
@@ -49,14 +50,18 @@ export function useReceiver(): UseReceiverReturn {
     if (decoded.type === 'manifest') {
       setTransfer((prev) => {
         if (prev.manifest) return prev
+        const justReceived = new Map(prev.receivedFrames)
+        const isComplete = isTransferComplete(justReceived, decoded.manifest.totalFrames)
         return {
           ...prev,
           manifest: decoded.manifest,
           totalFrames: decoded.manifest.totalFrames,
-          state: 'receiving' as ReceiverState,
+          receivedFrames: justReceived,
+          state: isComplete ? 'reconstructing' as ReceiverState : 'receiving' as ReceiverState,
           frameLog: addToLog(prev.frameLog, {
             frameNumber: 0,
             type: 'manifest',
+            message: `manifest received — ${decoded.manifest.filename} (${decoded.manifest.totalFrames} frames)`,
             time: Date.now(),
           }),
         }
@@ -66,8 +71,6 @@ export function useReceiver(): UseReceiverReturn {
 
     if (decoded.type === 'data') {
       setTransfer((prev) => {
-        if (!prev.manifest) return prev
-
         if (isDuplicateFrame(prev.receivedFrames, decoded.frame)) {
           return {
             ...prev,
@@ -75,6 +78,7 @@ export function useReceiver(): UseReceiverReturn {
             frameLog: addToLog(prev.frameLog, {
               frameNumber: decoded.frame.header.frameNumber,
               type: 'duplicate',
+              message: `duplicate frame #${decoded.frame.header.frameNumber}`,
               time: Date.now(),
             }),
           }
@@ -82,15 +86,31 @@ export function useReceiver(): UseReceiverReturn {
 
         const updated = new Map(prev.receivedFrames)
         updated.set(decoded.frame.header.frameNumber, decoded.frame.payload)
-        const isComplete = isTransferComplete(updated, prev.totalFrames)
 
+        // If we already have a manifest, check completion
+        if (prev.manifest) {
+          const isComplete = isTransferComplete(updated, prev.totalFrames)
+          return {
+            ...prev,
+            receivedFrames: updated,
+            state: isComplete ? 'reconstructing' as ReceiverState : 'receiving' as ReceiverState,
+            frameLog: addToLog(prev.frameLog, {
+              frameNumber: decoded.frame.header.frameNumber,
+              type: 'new',
+              message: `scanned frame #${decoded.frame.header.frameNumber}` + (isComplete ? ' — completed!' : ''),
+              time: Date.now(),
+            }),
+          }
+        }
+
+        // No manifest yet — still collect frames
         return {
           ...prev,
           receivedFrames: updated,
-          state: isComplete ? 'reconstructing' as ReceiverState : 'receiving' as ReceiverState,
           frameLog: addToLog(prev.frameLog, {
             frameNumber: decoded.frame.header.frameNumber,
             type: 'new',
+            message: `scanned frame #${decoded.frame.header.frameNumber} (waiting for manifest...)`,
             time: Date.now(),
           }),
         }

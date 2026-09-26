@@ -15,10 +15,12 @@ export type ReceiverState =
   | 'failed'
 
 export interface FrameLogEntry {
-  /** Frame number (0 = manifest) */
+  /** Frame number (0 = manifest, -1 = invalid) */
   frameNumber: number
   /** Type of event */
   type: 'manifest' | 'new' | 'duplicate' | 'invalid'
+  /** Human-readable description */
+  message: string
   /** Timestamp */
   time: number
 }

@@ -247,11 +247,8 @@ function ScanningView({
                      entry.type === 'invalid' ? '✗' :
                      '◈'}
                   </span>
-                  <span className="text-muted-foreground w-4 text-right">
-                    {entry.frameNumber >= 0 ? entry.frameNumber : '-'}
-                  </span>
-                  <span className="text-muted-foreground">
-                    {entry.type}
+                  <span className="text-muted-foreground truncate">
+                    {entry.message}
                   </span>
                 </div>
               ))}
