@@ -3,9 +3,11 @@
  */
 
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { type EncodedFrame, frameToQrData } from '@/protocol'
-import { prepareTransfer, type SenderTransfer, type SenderState } from '@/transfer/sender'
-import { generateQrDataUrl, MANIFEST_QR_CONFIG, type QrGenConfig, type QrErrorLevel } from '@/qr/generator'
+import { chunkFile } from '@/transfer/chunker'
+import { createManifestFrame, createDataFrame, frameToQrData, sha256 } from '@/protocol'
+import type { Manifest, EncodedFrame } from '@/protocol'
+import type { SenderTransfer, SenderState } from '@/transfer/sender'
+import { generateQrDataUrl, estimateMaxPayloadBytes, MANIFEST_QR_CONFIG, type QrGenConfig, type QrErrorLevel } from '@/qr/generator'
 import { groupFramesForDisplay, type QrDensity, type QrGridCell } from '@/qr/renderer'
 
 export type { QrDensity }
@@ -59,6 +61,39 @@ export function useSender(): UseSenderReturn {
   const framesRef = useRef<EncodedFrame[]>([])
   const pauseRef = useRef(false)
   const intervalMsRef = useRef(DEFAULT_FRAME_INTERVAL)
+  const selectedFileRef = useRef<File | null>(null)
+
+  const buildUserConfig = useCallback((): QrGenConfig => ({
+    errorCorrectionLevel: qrErrorLevel,
+    version: qrVersion,
+    width: 256,
+    margin: 4,
+  }), [qrErrorLevel, qrVersion])
+
+  const regenerateFrames = useCallback(async (file: File, config: QrGenConfig) => {
+    const maxPayload = estimateMaxPayloadBytes(config)
+    const chunks = await chunkFile(file, maxPayload)
+
+    const transferId = crypto.getRandomValues(new Uint8Array(16))
+    const fileHash = await sha256(file)
+
+    const manifest: Manifest = {
+      transferId,
+      filename: file.name,
+      fileSize: file.size,
+      totalFrames: chunks.length,
+      fileHash,
+      protocolVersion: 1,
+    }
+
+    const manifestFrame = createManifestFrame(manifest)
+    const dataFrames = chunks.map((chunk, i) =>
+      createDataFrame(transferId, i, chunks.length, chunk.data),
+    )
+    const frames = [manifestFrame, ...dataFrames]
+
+    return { manifest, frames }
+  }, [])
 
   const clearTimer = useCallback(() => {
     if (intervalRef.current) {
@@ -84,20 +119,13 @@ export function useSender(): UseSenderReturn {
       setState((prev) => ({ ...prev, cyclesCompleted: cyclesRef.current }))
     }
 
-    // Generate QR data URLs for the group
     // Manifest frames use MANIFEST_QR_CONFIG, data frames use user config
-    const userConfig: QrGenConfig = {
-      errorCorrectionLevel: qrErrorLevel,
-      version: qrVersion,
-      width: 256,
-      margin: 4,
-    }
+    const userConfig = buildUserConfig()
 
     const dataUrls = await Promise.all(
       group.map(async (f) => {
         const qrData = frameToQrData(f.bytes)
-        const config = f.isManifest ? MANIFEST_QR_CONFIG : userConfig
-        return generateQrDataUrl(qrData, config)
+        return generateQrDataUrl(qrData, f.isManifest ? MANIFEST_QR_CONFIG : userConfig)
       }),
     )
 
@@ -107,7 +135,7 @@ export function useSender(): UseSenderReturn {
     }))
 
     setDisplayCells(cells)
-  }, [density, qrErrorLevel, qrVersion])
+  }, [density, buildUserConfig])
 
   const startTimer = useCallback(() => {
     clearTimer()
@@ -118,21 +146,13 @@ export function useSender(): UseSenderReturn {
     }, intervalMsRef.current)
   }, [clearTimer, advanceFrames])
 
-  // Clean up interval on unmount or state change
-  useEffect(() => {
-    return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current)
-        intervalRef.current = null
-      }
-    }
-  }, [])
-
   const selectFile = useCallback(async (file: File) => {
+    selectedFileRef.current = file
     setState((prev) => ({ ...prev, state: 'preparing' as SenderState, file }))
 
     try {
-      const { manifest, frames } = await prepareTransfer(file)
+      const config = buildUserConfig()
+      const { manifest, frames } = await regenerateFrames(file, config)
       framesRef.current = frames
       currentIndexRef.current = 0
       cyclesRef.current = 0
@@ -154,7 +174,43 @@ export function useSender(): UseSenderReturn {
         error: err instanceof Error ? err.message : 'Failed to prepare file',
       }))
     }
-  }, [])
+  }, [buildUserConfig, regenerateFrames])
+
+  // When QR config changes, regenerate frames if a file is selected
+  // but not during active transmission
+  const [applyingConfig, setApplyingConfig] = useState(false)
+  useEffect(() => {
+    if (!selectedFileRef.current || state.state === 'transmitting' || state.state === 'paused') return
+    if (!applyingConfig) {
+      setApplyingConfig(true)
+      return
+    }
+
+    const doRegen = async () => {
+      const config = buildUserConfig()
+      setState((prev) => ({ ...prev, state: 'preparing' as SenderState }))
+      try {
+        const { manifest, frames } = await regenerateFrames(selectedFileRef.current!, config)
+        framesRef.current = frames
+        currentIndexRef.current = 0
+        cyclesRef.current = 0
+        setState((prev) => ({
+          ...prev,
+          state: 'ready',
+          manifest,
+          frames,
+          currentFrameIndex: 0,
+          totalFrames: frames.length,
+          cyclesCompleted: 0,
+          error: null,
+        }))
+      } catch (err) {
+        // Silently fail — keep old frames
+        setState((prev) => ({ ...prev, state: 'ready' as SenderState }))
+      }
+    }
+    doRegen()
+  }, [qrErrorLevel, qrVersion, buildUserConfig, regenerateFrames]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const startTransmission = useCallback(() => {
     if (state.frames.length === 0) return
@@ -162,10 +218,7 @@ export function useSender(): UseSenderReturn {
     pauseRef.current = false
     setState((prev) => ({ ...prev, state: 'transmitting' }))
 
-    // Immediate first render
     advanceFrames()
-
-    // Start cycling
     startTimer()
   }, [state.frames.length, advanceFrames, startTimer])
 
