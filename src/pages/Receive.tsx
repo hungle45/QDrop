@@ -6,7 +6,6 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import { Separator } from '@/components/ui/separator'
-import { ThemeToggle } from '@/components/common/theme-toggle'
 import { useReceiver } from '@/hooks/use-receiver'
 import type { Manifest } from '@/protocol'
 import type { ReceiverTransfer } from '@/transfer/receiver'
@@ -36,7 +35,6 @@ export default function Receive() {
             Stop
           </Button>
         )}
-        <ThemeToggle />
       </header>
 
       <div className="flex-1 p-4 sm:p-6 lg:p-8 max-w-3xl mx-auto w-full">

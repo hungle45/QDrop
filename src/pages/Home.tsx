@@ -2,15 +2,12 @@ import { ArrowUpFromLine, ScanLine } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
-import { ThemeToggle } from '@/components/common/theme-toggle'
 
 export default function Home() {
   const navigate = useNavigate()
 
   return (
     <div className="flex-1 flex flex-col items-center justify-center p-6">
-      <ThemeToggle className="fixed top-4 right-4" />
-
       <div className="max-w-lg w-full text-center space-y-12">
         <div className="space-y-4">
           <h1 className="text-5xl sm:text-6xl font-bold tracking-tight text-foreground">

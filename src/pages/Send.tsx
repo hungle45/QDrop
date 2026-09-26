@@ -9,7 +9,6 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { Slider } from '@/components/ui/slider'
 import { bytesToHex } from '@/protocol'
 import type { Manifest } from '@/protocol'
-import { ThemeToggle } from '@/components/common/theme-toggle'
 import { QrRenderer, type QrDensity, type QrGridCell } from '@/qr/renderer'
 import { useSender, FRAME_INTERVALS } from '@/hooks/use-sender'
 import { QR_ERROR_LEVELS, QR_VERSION_PRESETS } from '@/qr/generator'
@@ -74,7 +73,6 @@ export default function Send() {
         </Button>
         <span className="text-sm font-medium text-foreground">Send</span>
         <div className="flex-1" />
-        <ThemeToggle />
       </Header>
 
       <div className="flex-1 p-4 sm:p-6 lg:p-8 max-w-3xl mx-auto w-full">
