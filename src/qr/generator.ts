@@ -42,6 +42,9 @@ export const QR_ERROR_LEVELS: { label: string; value: QrErrorLevel; recovery: st
 
 export const QR_VERSION_PRESETS = [
   { label: 'Auto', value: undefined as number | undefined },
+  { label: 'v10', value: 10 },
+  { label: 'v15', value: 15 },
+  { label: 'v20', value: 20 },
   { label: 'v25', value: 25 },
   { label: 'v30', value: 30 },
   { label: 'v35', value: 35 },

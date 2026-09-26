@@ -131,7 +131,7 @@ export function useSender(): UseSenderReturn {
           const qrData = frameToQrData(f.bytes)
           const baseConfig = f.isManifest ? MANIFEST_QR_CONFIG : userConfig
           // Scale pixel width for higher versions so modules stay readable (~3px min)
-          const modules = (baseConfig.version ?? 25) * 4 + 17
+          const modules = (baseConfig.version ?? 10) * 4 + 17
           const minWidth = Math.min(Math.max(modules * 3, 256), 600)
           const renderConfig = { ...baseConfig, width: Math.max(baseConfig.width, minWidth) }
           return generateQrDataUrl(qrData, renderConfig)
