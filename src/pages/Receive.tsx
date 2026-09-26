@@ -41,11 +41,7 @@ export default function Receive() {
       <div className="flex-1 p-4 sm:p-6 lg:p-8 max-w-3xl mx-auto w-full">
         {state.state === 'idle' && <IdleView onStart={startReceiving} />}
 
-        {(state.state === 'camera_permission') && (
-          <LoadingView message="Requesting camera permission..." />
-        )}
-
-        {(state.state === 'scanning' || state.state === 'receiving') && (
+        {(state.state === 'camera_permission' || state.state === 'scanning' || state.state === 'receiving') && (
           <ScanningView state={state} videoRef={videoRef} />
         )}
 
@@ -115,7 +111,9 @@ function ScanningView({
     ? Math.round((state.receivedFrames.size / state.totalFrames) * 100)
     : 0
 
+  const isStarting = state.state === 'camera_permission'
   const isScanning = state.state === 'scanning'
+  const isReceiving = state.state === 'receiving'
 
   return (
     <div className="space-y-4">
@@ -127,12 +125,20 @@ function ScanningView({
             playsInline
             muted
           />
+          {isStarting && (
+            <div className="absolute inset-0 flex items-center justify-center bg-black">
+              <div className="flex flex-col items-center gap-2">
+                <LoaderCircle className="size-6 animate-spin text-muted-foreground" />
+                <span className="text-xs text-muted-foreground">Starting camera...</span>
+              </div>
+            </div>
+          )}
           {isScanning && (
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
               <div className="size-32 border-2 border-primary/40 rounded-lg" />
             </div>
           )}
-          {!isScanning && (
+          {isReceiving && (
             <div className="absolute inset-0 flex items-center justify-center">
               <Badge variant="default">
                 Receiving...

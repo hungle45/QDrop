@@ -158,7 +158,7 @@ export function useReceiver(): UseReceiverReturn {
 
       const video = videoRef.current
       if (!video) {
-        setTransfer((prev) => ({ ...prev, state: 'failed', error: 'Video element not found' }))
+        setTransfer((prev) => ({ ...prev, state: 'failed', error: 'Camera preview unavailable. Please refresh and try again.' }))
         return
       }
 
@@ -184,10 +184,37 @@ export function useReceiver(): UseReceiverReturn {
         }
       }, 200) // 5 scans/second
     } catch (err) {
+      console.error('Camera error:', err)
+
+      let message = 'Camera access failed.'
+      if (err instanceof DOMException) {
+        switch (err.name) {
+          case 'NotFoundError':
+            message = 'No camera found. Connect a camera and try again.'
+            break
+          case 'NotAllowedError':
+            message = 'Camera permission denied. Allow camera access in your browser settings.'
+            break
+          case 'NotReadableError':
+            message = 'Camera is already in use by another application.'
+            break
+          case 'OverconstrainedError':
+            message = 'Camera does not support the required resolution.'
+            break
+          case 'AbortError':
+            message = 'Camera access was aborted.'
+            break
+          default:
+            message = `Camera error: ${err.message}`
+        }
+      } else if (err instanceof Error) {
+        message = err.message
+      }
+
       setTransfer((prev) => ({
         ...prev,
         state: 'failed' as ReceiverState,
-        error: err instanceof Error ? err.message : 'Camera access denied',
+        error: message,
       }))
     }
   }, [processScanResult])
