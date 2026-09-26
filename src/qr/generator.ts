@@ -17,9 +17,18 @@ export interface QrGenConfig {
   margin: number
 }
 
+/** Config used for the manifest frame — high reliability, auto version */
+export const MANIFEST_QR_CONFIG: QrGenConfig = {
+  errorCorrectionLevel: 'H',
+  version: undefined,
+  width: 256,
+  margin: 4,
+}
+
+/** Default config for data frames */
 export const DEFAULT_QR_CONFIG: QrGenConfig = {
   errorCorrectionLevel: 'M',
-  version: 30,
+  version: undefined,
   width: 256,
   margin: 4,
 }
@@ -29,6 +38,18 @@ export const QR_ERROR_LEVELS: { label: string; value: QrErrorLevel; recovery: st
   { label: 'M', value: 'M', recovery: '~15%' },
   { label: 'Q', value: 'Q', recovery: '~25%' },
   { label: 'H', value: 'H', recovery: '~30%' },
+]
+
+export const QR_VERSION_PRESETS = [
+  { label: 'Auto', value: undefined as number | undefined },
+  { label: 'v5', value: 5 },
+  { label: 'v10', value: 10 },
+  { label: 'v15', value: 15 },
+  { label: 'v20', value: 20 },
+  { label: 'v25', value: 25 },
+  { label: 'v30', value: 30 },
+  { label: 'v35', value: 35 },
+  { label: 'v40', value: 40 },
 ]
 
 /**

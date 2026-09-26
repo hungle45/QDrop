@@ -12,7 +12,7 @@ import type { Manifest } from '@/protocol'
 import { ThemeToggle } from '@/components/common/theme-toggle'
 import { QrRenderer, type QrDensity, type QrGridCell } from '@/qr/renderer'
 import { useSender, FRAME_INTERVALS } from '@/hooks/use-sender'
-import { QR_ERROR_LEVELS } from '@/qr/generator'
+import { QR_ERROR_LEVELS, QR_VERSION_PRESETS } from '@/qr/generator'
 import type { QrErrorLevel } from '@/qr/generator'
 
 function formatSize(bytes: number): string {
@@ -545,9 +545,6 @@ function QrConfigControl({
   onErrorLevelChange: (level: QrErrorLevel) => void
   onVersionChange: (v: number | undefined) => void
 }) {
-  const version = config.version ?? 0
-  const isAuto = config.version === undefined
-
   return (
     <div className="space-y-3">
       <p className="text-sm font-medium text-foreground">QR Configuration</p>
@@ -574,32 +571,22 @@ function QrConfigControl({
       </div>
 
       <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <p className="text-xs text-muted-foreground">Version</p>
-          <div className="flex items-center gap-2">
-            <label className="flex items-center gap-1 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={isAuto}
-                onChange={(e) => onVersionChange(e.target.checked ? undefined : 30)}
-                className="size-3"
-              />
-              <span className="text-[10px] text-muted-foreground">Auto</span>
-            </label>
-          </div>
-        </div>
-        {!isAuto && (
-          <div className="flex items-center gap-3">
-            <Slider
-              value={[version]}
-              onValueChange={([v]) => onVersionChange(v)}
-              min={1}
-              max={40}
-              step={1}
-            />
-            <span className="text-xs text-muted-foreground font-mono w-8 text-right">v{version}</span>
-          </div>
-        )}
+        <p className="text-xs text-muted-foreground">Version</p>
+        <ToggleGroup
+          type="single"
+          value={config.version !== undefined ? String(config.version) : 'auto'}
+          onValueChange={(v) => {
+            if (v === 'auto') onVersionChange(undefined)
+            else if (v) onVersionChange(Number(v))
+          }}
+          className="flex flex-wrap gap-1"
+        >
+          {QR_VERSION_PRESETS.map((p) => (
+            <ToggleGroupItem key={p.label} value={p.value !== undefined ? String(p.value) : 'auto'} size="sm" className="text-xs px-2">
+              {p.label}
+            </ToggleGroupItem>
+          ))}
+        </ToggleGroup>
       </div>
     </div>
   )

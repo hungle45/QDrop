@@ -5,7 +5,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { type EncodedFrame, frameToQrData } from '@/protocol'
 import { prepareTransfer, type SenderTransfer, type SenderState } from '@/transfer/sender'
-import { generateQrBatch, DEFAULT_QR_CONFIG, type QrGenConfig, type QrErrorLevel } from '@/qr/generator'
+import { generateQrDataUrl, MANIFEST_QR_CONFIG, type QrGenConfig, type QrErrorLevel } from '@/qr/generator'
 import { groupFramesForDisplay, type QrDensity, type QrGridCell } from '@/qr/renderer'
 
 export type { QrDensity }
@@ -51,8 +51,8 @@ export function useSender(): UseSenderReturn {
   const [displayCells, setDisplayCells] = useState<QrGridCell[]>([])
   const [density, setDensity] = useState<QrDensity>(1)
   const [frameInterval, setFrameIntervalState] = useState<number>(DEFAULT_FRAME_INTERVAL)
-  const [qrErrorLevel, setQrErrorLevel] = useState<QrErrorLevel>(DEFAULT_QR_CONFIG.errorCorrectionLevel)
-  const [qrVersion, setQrVersion] = useState<number | undefined>(DEFAULT_QR_CONFIG.version)
+  const [qrErrorLevel, setQrErrorLevel] = useState<QrErrorLevel>('M')
+  const [qrVersion, setQrVersion] = useState<number | undefined>(undefined)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const currentIndexRef = useRef(0)
   const cyclesRef = useRef(0)
@@ -85,13 +85,21 @@ export function useSender(): UseSenderReturn {
     }
 
     // Generate QR data URLs for the group
-    const qrDataStrings = group.map((f) => frameToQrData(f.bytes))
-    const dataUrls = await generateQrBatch(qrDataStrings, {
+    // Manifest frames use MANIFEST_QR_CONFIG, data frames use user config
+    const userConfig: QrGenConfig = {
       errorCorrectionLevel: qrErrorLevel,
       version: qrVersion,
       width: 256,
       margin: 4,
-    })
+    }
+
+    const dataUrls = await Promise.all(
+      group.map(async (f) => {
+        const qrData = frameToQrData(f.bytes)
+        const config = f.isManifest ? MANIFEST_QR_CONFIG : userConfig
+        return generateQrDataUrl(qrData, config)
+      }),
+    )
 
     const cells: QrGridCell[] = group.map((frame, index) => ({
       frame,
