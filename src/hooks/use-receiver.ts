@@ -75,12 +75,6 @@ export function useReceiver(): UseReceiverReturn {
           return {
             ...prev,
             duplicateCount: prev.duplicateCount + 1,
-            frameLog: addToLog(prev.frameLog, {
-              frameNumber: decoded.frame.header.frameNumber,
-              type: 'duplicate',
-              message: `duplicate frame #${decoded.frame.header.frameNumber}`,
-              time: Date.now(),
-            }),
           }
         }
 
