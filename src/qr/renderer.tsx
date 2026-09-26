@@ -38,7 +38,7 @@ export function QrRenderer({ cells, density, className }: QrRendererProps) {
           <img
             src={cell.dataUrl}
             alt={`Frame ${cell.frame.number}`}
-            className="w-full h-auto"
+            className="w-full h-auto bg-white rounded-sm p-1"
             draggable={false}
           />
           <span className="text-[10px] text-muted-foreground font-mono">

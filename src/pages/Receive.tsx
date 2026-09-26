@@ -226,6 +226,39 @@ function ScanningView({
           </CardContent>
         </Card>
       )}
+
+      {(isScanning || isReceiving) && state.frameLog.length > 0 && (
+        <Card>
+          <CardContent className="pt-3 pb-3 max-h-48 overflow-y-auto">
+            <p className="text-xs font-medium text-foreground uppercase tracking-wider mb-2">
+              Scan Log
+            </p>
+            <div className="space-y-0.5">
+              {state.frameLog.slice(-30).reverse().map((entry, i) => (
+                <div key={entry.time + '-' + i} className="flex items-center gap-2 text-xs font-mono">
+                  <span className={
+                    entry.type === 'new' ? 'text-green-500' :
+                    entry.type === 'duplicate' ? 'text-yellow-500' :
+                    entry.type === 'invalid' ? 'text-red-500' :
+                    'text-blue-500'
+                  }>
+                    {entry.type === 'new' ? '✓' :
+                     entry.type === 'duplicate' ? '↻' :
+                     entry.type === 'invalid' ? '✗' :
+                     '◈'}
+                  </span>
+                  <span className="text-muted-foreground w-4 text-right">
+                    {entry.frameNumber >= 0 ? entry.frameNumber : '-'}
+                  </span>
+                  <span className="text-muted-foreground">
+                    {entry.type}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   )
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { addFrame, reconstructFile, type ReceiverTransfer } from '../../transfer/receiver'
+import { isDuplicateFrame, isTransferComplete, reconstructFile } from '../../transfer/receiver'
 import { type DataFrame, type FrameHeader, type Manifest } from '../../protocol/types'
 
 function makeDataFrame(frameNumber: number, totalFrames: number, payload: Uint8Array): DataFrame {
@@ -28,149 +28,104 @@ function makeManifest(totalFrames: number): Manifest {
 }
 
 describe('Receiver', () => {
-  describe('addFrame', () => {
-    it('should add a new frame', () => {
-      const state: ReceiverTransfer = {
-        state: 'receiving',
-        manifest: makeManifest(5),
-        receivedFrames: new Map(),
-        totalFrames: 5,
-        duplicateCount: 0,
-        invalidCount: 0,
-        error: null,
-        blob: null,
-      }
-
+  describe('isDuplicateFrame', () => {
+    it('should detect a new frame', () => {
+      const received = new Map<number, Uint8Array>()
       const frame = makeDataFrame(1, 5, new Uint8Array([1, 2, 3]))
-      const { added, isComplete } = addFrame(state, frame)
-
-      expect(added).toBe(true)
-      expect(isComplete).toBe(false)
-      expect(state.receivedFrames.size).toBe(1)
-      expect(state.receivedFrames.has(1)).toBe(true)
+      expect(isDuplicateFrame(received, frame)).toBe(false)
     })
 
     it('should detect duplicate frames', () => {
-      const state: ReceiverTransfer = {
-        state: 'receiving',
-        manifest: makeManifest(5),
-        receivedFrames: new Map(),
-        totalFrames: 5,
-        duplicateCount: 0,
-        invalidCount: 0,
-        error: null,
-        blob: null,
-      }
-
-      const frame = makeDataFrame(1, 5, new Uint8Array([1, 2, 3]))
-      addFrame(state, frame)
-      const { added, isComplete } = addFrame(state, frame)
-
-      expect(added).toBe(false)
-      expect(isComplete).toBe(false)
-      expect(state.duplicateCount).toBe(1)
+      const received = new Map<number, Uint8Array>()
+      received.set(1, new Uint8Array([1, 2, 3]))
+      const frame = makeDataFrame(1, 5, new Uint8Array([4, 5, 6]))
+      expect(isDuplicateFrame(received, frame)).toBe(true)
     })
 
-    it('should handle out-of-order frames', () => {
-      const state: ReceiverTransfer = {
-        state: 'receiving',
-        manifest: makeManifest(5),
-        receivedFrames: new Map(),
+    it('should not treat manifest frames as duplicates', () => {
+      const received = new Map<number, Uint8Array>()
+      const header: FrameHeader = {
+        magic: 0x5144524f,
+        version: 1,
+        transferId: new Uint8Array(16).fill(1),
+        frameType: 0,
+        frameNumber: 0,
         totalFrames: 5,
-        duplicateCount: 0,
-        invalidCount: 0,
-        error: null,
-        blob: null,
+        payloadLength: 3,
+        crc32: 0,
       }
+      const frame: DataFrame = { header, payload: new Uint8Array([1, 2, 3]) }
+      expect(isDuplicateFrame(received, frame)).toBe(false)
+    })
+  })
 
-      // Add frames in reverse order
-      for (let i = 5; i >= 1; i--) {
-        const frame = makeDataFrame(i, 5, new Uint8Array([i]))
-        addFrame(state, frame)
-      }
-
-      expect(state.receivedFrames.size).toBe(5)
-
-      // Verify frames are stored by frame number, not insert order
-      for (let i = 1; i <= 5; i++) {
-        expect(state.receivedFrames.has(i)).toBe(true)
-      }
+  describe('isTransferComplete', () => {
+    it('should detect completion', () => {
+      const received = new Map<number, Uint8Array>()
+      received.set(1, new Uint8Array([1]))
+      received.set(2, new Uint8Array([2]))
+      received.set(3, new Uint8Array([3]))
+      expect(isTransferComplete(received, 3)).toBe(true)
     })
 
-    it('should detect completion when all frames received', () => {
-      const state: ReceiverTransfer = {
-        state: 'receiving',
-        manifest: makeManifest(3),
-        receivedFrames: new Map(),
-        totalFrames: 3,
-        duplicateCount: 0,
-        invalidCount: 0,
-        error: null,
-        blob: null,
-      }
+    it('should detect incomplete transfer', () => {
+      const received = new Map<number, Uint8Array>()
+      received.set(1, new Uint8Array([1]))
+      received.set(2, new Uint8Array([2]))
+      expect(isTransferComplete(received, 3)).toBe(false)
+    })
 
-      for (let i = 1; i <= 2; i++) {
-        const frame = makeDataFrame(i, 3, new Uint8Array([i]))
-        addFrame(state, frame)
-      }
-
-      const frame = makeDataFrame(3, 3, new Uint8Array([3]))
-      const { added, isComplete } = addFrame(state, frame)
-      expect(added).toBe(true)
-      expect(isComplete).toBe(true)
+    it('should handle empty received frames', () => {
+      const received = new Map<number, Uint8Array>()
+      expect(isTransferComplete(received, 5)).toBe(false)
     })
   })
 
   describe('reconstructFile', () => {
     it('should reconstruct file from frames in any order', () => {
-      const state: ReceiverTransfer = {
-        state: 'receiving',
+      const received = new Map<number, Uint8Array>()
+      received.set(3, new Uint8Array([3]))
+      received.set(1, new Uint8Array([1]))
+      received.set(4, new Uint8Array([4]))
+      received.set(2, new Uint8Array([2]))
+
+      const state = {
+        state: 'receiving' as const,
         manifest: makeManifest(4),
-        receivedFrames: new Map(),
+        receivedFrames: received,
         totalFrames: 4,
         duplicateCount: 0,
         invalidCount: 0,
-        error: null,
-        blob: null,
+        error: null as string | null,
+        blob: null as Blob | null,
+        frameLog: [],
       }
-
-      // Add frames out of order: 3, 1, 4, 2
-      const frame3 = makeDataFrame(3, 4, new Uint8Array([3]))
-      const frame1 = makeDataFrame(1, 4, new Uint8Array([1]))
-      const frame4 = makeDataFrame(4, 4, new Uint8Array([4]))
-      const frame2 = makeDataFrame(2, 4, new Uint8Array([2]))
-
-      addFrame(state, frame3)
-      addFrame(state, frame1)
-      addFrame(state, frame4)
-      addFrame(state, frame2)
 
       const blob = reconstructFile(state)
       expect(blob).not.toBeNull()
 
       return blob!.arrayBuffer().then((buf) => {
         const bytes = new Uint8Array(buf)
-        // Should be in order: 1, 2, 3, 4
         expect(bytes).toEqual(new Uint8Array([1, 2, 3, 4]))
       })
     })
 
     it('should return null if not all frames received', () => {
-      const state: ReceiverTransfer = {
-        state: 'receiving',
+      const received = new Map<number, Uint8Array>()
+      for (let i = 1; i <= 5; i++) {
+        received.set(i, new Uint8Array([i]))
+      }
+
+      const state = {
+        state: 'receiving' as const,
         manifest: makeManifest(10),
-        receivedFrames: new Map(),
+        receivedFrames: received,
         totalFrames: 10,
         duplicateCount: 0,
         invalidCount: 0,
-        error: null,
-        blob: null,
-      }
-
-      // Only add 5 frames
-      for (let i = 1; i <= 5; i++) {
-        const frame = makeDataFrame(i, 10, new Uint8Array([i]))
-        addFrame(state, frame)
+        error: null as string | null,
+        blob: null as Blob | null,
+        frameLog: [],
       }
 
       const blob = reconstructFile(state)

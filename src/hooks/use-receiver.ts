@@ -5,7 +5,14 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { decodeQrData } from '@/protocol'
 import { sha256, equalBytes } from '@/protocol'
-import { type ReceiverTransfer, type ReceiverState, addFrame, reconstructFile } from '@/transfer/receiver'
+import {
+  type ReceiverTransfer,
+  type ReceiverState,
+  isDuplicateFrame,
+  isTransferComplete,
+  reconstructFile,
+  addToLog,
+} from '@/transfer/receiver'
 import { startCamera, stopCamera, getImageDataFromVideo, scanImageData, type ScanResult } from '@/qr/scanner'
 
 interface UseReceiverReturn {
@@ -17,75 +24,82 @@ interface UseReceiverReturn {
 }
 
 export function useReceiver(): UseReceiverReturn {
-  const [transfer, setTransfer] = useState<ReceiverTransfer>({
-    state: 'idle',
-    manifest: null,
-    receivedFrames: new Map(),
-    totalFrames: 0,
-    duplicateCount: 0,
-    invalidCount: 0,
-    error: null,
-    blob: null,
-  })
+  const [transfer, setTransfer] = useState<ReceiverTransfer>(createInitialState('idle'))
 
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const scanIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const transferRef = useRef(transfer)
-
-  // Keep ref in sync
-  useEffect(() => {
-    transferRef.current = transfer
-  }, [transfer])
 
   const processScanResult = useCallback((scanResult: ScanResult) => {
-    const current = transferRef.current
-    if (current.state !== 'scanning' && current.state !== 'receiving') return
-
     const decoded = decodeQrData(scanResult.data)
 
     if (decoded.type === 'invalid') {
-      setTransfer((prev) => ({ ...prev, invalidCount: prev.invalidCount + 1 }))
-      return
-    }
-
-    if (decoded.type === 'manifest' && !current.manifest) {
-      const manifest = decoded.manifest
       setTransfer((prev) => ({
         ...prev,
-        manifest,
-        totalFrames: manifest.totalFrames,
-        state: 'receiving' as ReceiverState,
+        invalidCount: prev.invalidCount + 1,
+        frameLog: addToLog(prev.frameLog, {
+          frameNumber: -1,
+          type: 'invalid',
+          time: Date.now(),
+        }),
       }))
       return
     }
 
-    if (decoded.type === 'data' && current.manifest) {
-      const { added } = addFrame(
-        { ...current },
-        decoded.frame,
-      )
+    if (decoded.type === 'manifest') {
+      setTransfer((prev) => {
+        if (prev.manifest) return prev
+        return {
+          ...prev,
+          manifest: decoded.manifest,
+          totalFrames: decoded.manifest.totalFrames,
+          state: 'receiving' as ReceiverState,
+          frameLog: addToLog(prev.frameLog, {
+            frameNumber: 0,
+            type: 'manifest',
+            time: Date.now(),
+          }),
+        }
+      })
+      return
+    }
 
-      if (added) {
-        setTransfer((prev) => {
-          const updated = new Map(prev.receivedFrames)
-          updated.set(decoded.frame.header.frameNumber, decoded.frame.payload)
-          const isDone = updated.size >= prev.totalFrames
+    if (decoded.type === 'data') {
+      setTransfer((prev) => {
+        if (!prev.manifest) return prev
 
+        if (isDuplicateFrame(prev.receivedFrames, decoded.frame)) {
           return {
             ...prev,
-            receivedFrames: updated,
-            state: isDone ? 'reconstructing' as ReceiverState : 'receiving' as ReceiverState,
-            duplicateCount: prev.duplicateCount,
-            invalidCount: prev.invalidCount,
+            duplicateCount: prev.duplicateCount + 1,
+            frameLog: addToLog(prev.frameLog, {
+              frameNumber: decoded.frame.header.frameNumber,
+              type: 'duplicate',
+              time: Date.now(),
+            }),
           }
-        })
-      } else {
-        // duplicate
-        setTransfer((prev) => ({ ...prev, duplicateCount: prev.duplicateCount + 1 }))
-      }
+        }
+
+        const updated = new Map(prev.receivedFrames)
+        updated.set(decoded.frame.header.frameNumber, decoded.frame.payload)
+        const isComplete = isTransferComplete(updated, prev.totalFrames)
+
+        return {
+          ...prev,
+          receivedFrames: updated,
+          state: isComplete ? 'reconstructing' as ReceiverState : 'receiving' as ReceiverState,
+          frameLog: addToLog(prev.frameLog, {
+            frameNumber: decoded.frame.header.frameNumber,
+            type: 'new',
+            time: Date.now(),
+          }),
+        }
+      })
     }
   }, [])
+
+  const processScanResultRef = useRef(processScanResult)
+  processScanResultRef.current = processScanResult
 
   // When state becomes 'reconstructing', do the reconstruction
   useEffect(() => {
@@ -169,9 +183,6 @@ export function useReceiver(): UseReceiverReturn {
 
       // Start scan loop
       scanIntervalRef.current = setInterval(() => {
-        const current = transferRef.current
-        if (current.state !== 'scanning' && current.state !== 'receiving') return
-
         const videoEl = videoRef.current
         if (!videoEl) return
 
@@ -180,9 +191,9 @@ export function useReceiver(): UseReceiverReturn {
 
         const results = scanImageData(imageData)
         for (const result of results) {
-          processScanResult(result)
+          processScanResultRef.current(result)
         }
-      }, 200) // 5 scans/second
+      }, 200)
     } catch (err) {
       console.error('Camera error:', err)
 
@@ -254,5 +265,6 @@ function createInitialState(state: ReceiverState = 'idle'): ReceiverTransfer {
     invalidCount: 0,
     error: null,
     blob: null,
+    frameLog: [],
   }
 }

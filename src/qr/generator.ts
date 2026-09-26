@@ -10,7 +10,7 @@ import QRCode from 'qrcode'
 export async function generateQrDataUrl(data: string): Promise<string> {
   return QRCode.toDataURL(data, {
     errorCorrectionLevel: 'L', // Low error correction = higher data density
-    margin: 1,
+    margin: 4, // Wide white border for reliable scanning in dark mode
     width: 256,
   })
 }
@@ -22,7 +22,7 @@ export async function generateQrSvg(data: string): Promise<string> {
   return QRCode.toString(data, {
     type: 'svg',
     errorCorrectionLevel: 'L',
-    margin: 1,
+    margin: 4,
   })
 }
 

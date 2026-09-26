@@ -14,6 +14,15 @@ export type ReceiverState =
   | 'complete'
   | 'failed'
 
+export interface FrameLogEntry {
+  /** Frame number (0 = manifest) */
+  frameNumber: number
+  /** Type of event */
+  type: 'manifest' | 'new' | 'duplicate' | 'invalid'
+  /** Timestamp */
+  time: number
+}
+
 export interface ReceiverTransfer {
   state: ReceiverState
   manifest: Manifest | null
@@ -24,6 +33,8 @@ export interface ReceiverTransfer {
   error: string | null
   /** The final reconstructed blob, available when state is 'complete' */
   blob: Blob | null
+  /** Recent scan events for the log display */
+  frameLog: FrameLogEntry[]
 }
 
 export function createReceiverState(): ReceiverTransfer {
@@ -36,26 +47,36 @@ export function createReceiverState(): ReceiverTransfer {
     invalidCount: 0,
     error: null,
     blob: null,
+    frameLog: [],
   }
 }
 
-export function addFrame(
-  state: ReceiverTransfer,
+const MAX_LOG_ENTRIES = 100
+
+export function addToLog(log: FrameLogEntry[], entry: FrameLogEntry): FrameLogEntry[] {
+  return [...log.slice(-(MAX_LOG_ENTRIES - 1)), entry]
+}
+
+/**
+ * Check whether a frame is a duplicate.
+ * Pure — does not mutate state.
+ */
+export function isDuplicateFrame(
+  receivedFrames: Map<number, Uint8Array>,
   frame: DataFrame,
-): { added: boolean; isComplete: boolean } {
-  if (frame.header.frameType === 0) {
-    // Manifest frame — already handled separately
-    return { added: false, isComplete: false }
-  }
+): boolean {
+  if (frame.header.frameType === 0) return false // manifest
+  return receivedFrames.has(frame.header.frameNumber)
+}
 
-  if (state.receivedFrames.has(frame.header.frameNumber)) {
-    state.duplicateCount++
-    return { added: false, isComplete: false }
-  }
-
-  state.receivedFrames.set(frame.header.frameNumber, frame.payload)
-  const isComplete = state.receivedFrames.size >= state.totalFrames
-  return { added: true, isComplete }
+/**
+ * Check whether the transfer is complete.
+ */
+export function isTransferComplete(
+  receivedFrames: Map<number, Uint8Array>,
+  totalFrames: number,
+): boolean {
+  return receivedFrames.size >= totalFrames
 }
 
 /**
