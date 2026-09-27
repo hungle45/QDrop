@@ -65,6 +65,10 @@ export function parseFrameRange(range: string): Set<number> {
  * "filePath:ranges". Returns a Map of file path → Set of frame numbers.
  *
  * For file mode (single-file), returns a single-entry map with key "".
+ *
+ * Supports @manifest:
+ *   File mode:   "2, 2-7, @manifest"  → key "@manifest" with empty set + key "" with data frames
+ *   Folder mode: "@manifest: 2, 5-7"  → key "@manifest" with manifest fragment indices
  */
 export function parseMissingFrameList(input: string): Map<string, Set<number>> {
   const result = new Map<string, Set<number>>()
@@ -76,13 +80,29 @@ export function parseMissingFrameList(input: string): Map<string, Set<number>> {
     const trimmed = line.trim()
     if (!trimmed) continue
 
+    // Handle @manifest: prefix (folder mode — manifest fragments)
+    if (/^@manifest\s*:/.test(trimmed)) {
+      const ranges = trimmed.replace(/^@manifest\s*:\s*/, '').trim()
+      const frames = ranges ? parseFrameRange(ranges) : new Set<number>()
+      if (ranges && frames.size === 0) return new Map()
+      result.set('@manifest', frames)
+      continue
+    }
+
     // Check for "path:ranges" format
     const colonIndex = trimmed.lastIndexOf(':')
     if (colonIndex === -1) {
-      // No colon — assume file mode with just ranges
-      const frames = parseFrameRange(trimmed)
-      if (frames.size === 0) return new Map()
-      result.set('', frames)
+      // No colon — file mode: ranges and optional @manifest token
+      const tokens = trimmed.split(',').map((t) => t.trim())
+      const hasManifest = tokens.some((t) => t === '@manifest')
+      const withoutManifest = tokens
+        .filter((t) => t !== '@manifest')
+        .join(',')
+        .trim()
+      const frames = withoutManifest ? parseFrameRange(withoutManifest) : new Set<number>()
+      if (withoutManifest && frames.size === 0) return new Map()
+      if (frames.size > 0) result.set('', frames)
+      if (hasManifest) result.set('@manifest', new Set<number>())
       continue
     }
 

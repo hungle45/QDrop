@@ -260,3 +260,274 @@ describe('Full cycle: parse → format roundtrip', () => {
     expect(formatFrameRanges(parsed)).toBe('1-8')
   })
 })
+
+describe('Retransmission scheduler — continuous cycling', () => {
+  /**
+   * Simulate the scheduler used by advanceFrames.
+   * The scheduler wraps and continues indefinitely until cleared.
+   */
+  class CyclingScheduler {
+    frames: number[]
+    currentIndex: number
+    cycles: number
+
+    constructor(frames: number[]) {
+      this.frames = frames
+      this.currentIndex = 0
+      this.cycles = 0
+    }
+
+    /** Advance `count` positions, wrapping around. Returns the frames shown. */
+    advance(count: number): number[] {
+      const result: number[] = []
+      for (let i = 0; i < count; i++) {
+        if (this.currentIndex >= this.frames.length) {
+          this.currentIndex = 0
+          this.cycles++
+        }
+        result.push(this.frames[this.currentIndex])
+        this.currentIndex++
+      }
+      return result
+    }
+  }
+
+  it('should cycle through a subset indefinitely', () => {
+    // 5 frames requested for retransmission
+    const scheduler = new CyclingScheduler([1, 2, 3, 4, 5])
+    // First cycle (display group size = 1 for simplicity)
+    expect(scheduler.advance(5)).toEqual([1, 2, 3, 4, 5])
+    expect(scheduler.cycles).toBe(0)
+
+    // Second cycle
+    expect(scheduler.advance(5)).toEqual([1, 2, 3, 4, 5])
+    expect(scheduler.cycles).toBe(1)
+
+    // Third cycle (partial advance then wrap)
+    expect(scheduler.advance(3)).toEqual([1, 2, 3])
+    expect(scheduler.cycles).toBe(2)
+    expect(scheduler.advance(3)).toEqual([4, 5, 1])
+    expect(scheduler.cycles).toBe(3)
+  })
+
+  it('should keep cycling until explicitly cleared', () => {
+    const scheduler = new CyclingScheduler([10, 20, 30])
+    // Multiple full cycles
+    for (let cycle = 0; cycle < 10; cycle++) {
+      const result = scheduler.advance(3)
+      expect(result).toEqual([10, 20, 30])
+      if (cycle > 0) {
+        expect(scheduler.cycles).toBe(cycle)
+      }
+    }
+    expect(scheduler.cycles).toBe(9)
+
+    // Clear
+    scheduler.currentIndex = 0
+    scheduler.cycles = 0
+    expect(scheduler.cycles).toBe(0)
+    expect(scheduler.advance(1)).toEqual([10])
+  })
+
+  it('should replace retransmission set and restart cycling', () => {
+    const scheduler = new CyclingScheduler([1, 2])
+
+    // First retransmit set: 2 frames
+    expect(scheduler.advance(2)).toEqual([1, 2])
+    expect(scheduler.cycles).toBe(0)
+
+    // Replace with new set and restart
+    scheduler.frames = [10, 20, 30]
+    scheduler.currentIndex = 0
+    scheduler.cycles = 0
+
+    // New set cycles from start
+    expect(scheduler.advance(3)).toEqual([10, 20, 30])
+    expect(scheduler.cycles).toBe(0)
+
+    // Continues cycling the new set
+    expect(scheduler.advance(3)).toEqual([10, 20, 30])
+    expect(scheduler.cycles).toBe(1)
+  })
+
+  it('should NOT automatically stop after one cycle', () => {
+    const scheduler = new CyclingScheduler([5, 6, 7])
+
+    // Cycle 1
+    scheduler.advance(3)
+    expect(scheduler.cycles).toBe(0)
+
+    // Cycle 2 — no auto-stop after cycle 1
+    scheduler.advance(3)
+    expect(scheduler.cycles).toBe(1)
+
+    // Cycle 3 — still going
+    scheduler.advance(3)
+    expect(scheduler.cycles).toBe(2)
+
+    // Cycle 4 — still going, never auto-stops
+    scheduler.advance(3)
+    expect(scheduler.cycles).toBe(3)
+
+    // Explicit clear resets
+    scheduler.currentIndex = 0
+    scheduler.cycles = 0
+    expect(scheduler.advance(1)).toEqual([5])
+    expect(scheduler.cycles).toBe(0)
+  })
+})
+
+describe('@manifest retransmission', () => {
+  // Simulate a sender's frames array for file mode with manifest + 5 data frames
+  function makeFileFramesWithManifest(count: number) {
+    const frames: Array<{ isManifest: boolean; number: number; fileId?: number; manifestFragmentIndex?: number }> = [
+      { isManifest: true, number: 0 },
+    ]
+    for (let i = 1; i <= count; i++) {
+      frames.push({ isManifest: false, number: i })
+    }
+    return frames
+  }
+
+  // Simulate folder mode frames: 3 manifest fragments + data frames for 2 files
+  function makeFolderFramesWithManifest() {
+    const frames: Array<{ isManifest: boolean; number: number; fileId?: number; manifestFragmentIndex?: number }> = []
+    // 3 manifest fragments
+    for (let i = 0; i < 3; i++) {
+      frames.push({ isManifest: true, number: i, manifestFragmentIndex: i })
+    }
+    // File 0: 8 frames
+    for (let i = 0; i < 8; i++) {
+      frames.push({ isManifest: false, number: i, fileId: 0 })
+    }
+    // File 1: 4 frames
+    for (let i = 0; i < 4; i++) {
+      frames.push({ isManifest: false, number: i, fileId: 1 })
+    }
+    return frames
+  }
+
+  function selectFileMode(
+    allFrames: Array<{ isManifest: boolean; number: number; fileId?: number; manifestFragmentIndex?: number }>,
+    input: string,
+  ) {
+    const parsed = parseMissingFrameList(input)
+    if (parsed.size === 0) return []
+
+    const missingFrames = parsed.get('')
+    const manifestRequested = parsed.has('@manifest')
+
+    return allFrames.filter((frame) => {
+      if (frame.isManifest) return manifestRequested
+      return missingFrames ? missingFrames.has(frame.number - 1) : false
+    })
+  }
+
+  function selectFolderMode(
+    allFrames: Array<{ isManifest: boolean; number: number; fileId?: number; manifestFragmentIndex?: number }>,
+    input: string,
+  ) {
+    const parsed = parseMissingFrameList(input)
+    if (parsed.size === 0) return []
+
+    const manifestFragments = parsed.get('@manifest')
+    const hasManifest = manifestFragments !== undefined
+
+    // Build file-id map for remaining entries
+    const fileIdByPath = new Map<string, number>()
+    fileIdByPath.set('src/main.go', 0)
+    fileIdByPath.set('src/config.go', 1)
+
+    const missingSetByFileId = new Map<number, Set<number>>()
+    for (const [path, frames] of parsed) {
+      if (path === '@manifest') continue
+      const fileId = fileIdByPath.get(path)
+      if (fileId === undefined) return []
+      missingSetByFileId.set(fileId, frames)
+    }
+
+    return allFrames.filter((frame) => {
+      if (frame.isManifest && frame.manifestFragmentIndex !== undefined) {
+        return hasManifest && manifestFragments!.has(frame.manifestFragmentIndex)
+      }
+      if (frame.fileId === undefined) return false
+      const missing = missingSetByFileId.get(frame.fileId)
+      if (!missing) return false
+      return missing.has(frame.number)
+    })
+  }
+
+  describe('file mode', () => {
+    it('should select only the manifest with @manifest', () => {
+      const frames = makeFileFramesWithManifest(5)
+      const selected = selectFileMode(frames, '@manifest')
+      expect(selected).toHaveLength(1)
+      expect(selected[0].isManifest).toBe(true)
+    })
+
+    it('should select manifest + data frames', () => {
+      const frames = makeFileFramesWithManifest(10)
+      const selected = selectFileMode(frames, '2, 5-7, @manifest')
+      // manifest + frames 2, 5, 6, 7 (1-indexed)
+      expect(selected).toHaveLength(5)
+      expect(selected.filter((f) => f.isManifest)).toHaveLength(1)
+      expect(selected.filter((f) => !f.isManifest).map((f) => f.number)).toEqual([2, 5, 6, 7])
+    })
+
+    it('should select data frames without manifest', () => {
+      const frames = makeFileFramesWithManifest(10)
+      const selected = selectFileMode(frames, '2, 5-7')
+      expect(selected).toHaveLength(4)
+      expect(selected.every((f) => !f.isManifest)).toBe(true)
+      expect(selected.map((f) => f.number)).toEqual([2, 5, 6, 7])
+    })
+
+    it('should handle single frame + manifest', () => {
+      const frames = makeFileFramesWithManifest(10)
+      const selected = selectFileMode(frames, '3, @manifest')
+      expect(selected).toHaveLength(2)
+      expect(selected.filter((f) => f.isManifest)).toHaveLength(1)
+      expect(selected.filter((f) => !f.isManifest).map((f) => f.number)).toEqual([3])
+    })
+  })
+
+  describe('folder mode', () => {
+    it('should select specific manifest fragments with @manifest:', () => {
+      const frames = makeFolderFramesWithManifest()
+      const selected = selectFolderMode(frames, '@manifest: 1, 3')
+      // 1→{0}, 3→{2} = fragments at indices 0 and 2
+      expect(selected).toHaveLength(2)
+      expect(selected.every((f) => f.isManifest)).toBe(true)
+      expect(selected.map((f) => f.manifestFragmentIndex)).toEqual([0, 2])
+    })
+
+    it('should select manifest fragments + file frames', () => {
+      const frames = makeFolderFramesWithManifest()
+      const selected = selectFolderMode(frames, '@manifest: 1,3\nsrc/main.go: 1-3,7')
+      // manifest: fragments 0,2
+      // main.go: frames 0,1,2,6
+      expect(selected).toHaveLength(6)
+      const manifestFrames = selected.filter((f) => f.isManifest)
+      expect(manifestFrames).toHaveLength(2)
+      expect(manifestFrames.map((f) => f.manifestFragmentIndex)).toEqual([0, 2])
+      const dataFrames = selected.filter((f) => !f.isManifest)
+      expect(dataFrames).toHaveLength(4)
+      expect(dataFrames.every((f) => f.fileId === 0)).toBe(true)
+    })
+
+    it('should handle @manifest: with single fragment', () => {
+      const frames = makeFolderFramesWithManifest()
+      const selected = selectFolderMode(frames, '@manifest: 1')
+      expect(selected).toHaveLength(1)
+      expect(selected[0].manifestFragmentIndex).toBe(0)
+    })
+
+    it('should handle overlapping fragment ranges', () => {
+      const frames = makeFolderFramesWithManifest()
+      const selected = selectFolderMode(frames, '@manifest: 1-3, 2-3')
+      // 1-3→{0,1,2}, 2-3→{1,2} = {0,1,2}
+      expect(selected).toHaveLength(3)
+      expect(selected.map((f) => f.manifestFragmentIndex)).toEqual([0, 1, 2])
+    })
+  })
+})

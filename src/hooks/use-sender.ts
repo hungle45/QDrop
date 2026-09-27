@@ -118,17 +118,6 @@ export function useSender(): UseSenderReturn {
       if (wrapped) {
         cyclesRef.current++
         setState((prev) => ({ ...prev, cyclesCompleted: cyclesRef.current }))
-
-        // If we completed a retransmit cycle, go back to normal transmission
-        if (retransmitFramesRef.current) {
-          retransmitFramesRef.current = null
-          currentIndexRef.current = 0
-          setState((prev) => ({
-            ...prev,
-            retransmitFrameCount: null,
-            retransmitLabel: null,
-          }))
-        }
       }
 
       const userConfig = buildUserConfig()
@@ -449,7 +438,7 @@ export function useSender(): UseSenderReturn {
     }
 
     let selected: EncodedFrame[]
-    let label: string
+    const labelParts: string[] = []
 
     if (isFolder) {
       // Folder mode: match file paths from the parsed input
@@ -465,50 +454,70 @@ export function useSender(): UseSenderReturn {
       }
 
       const missingSetByFileId = new Map<number, Set<number>>()
+      let hasFileEntries = false
       for (const [path, frames] of parsed) {
+        if (path === '@manifest') continue
         const fileId = fileIdByPath.get(path)
         if (fileId === undefined) {
           setState((prev) => ({ ...prev, error: `Unknown file path: ${path}` }))
           return
         }
         missingSetByFileId.set(fileId, frames)
+        hasFileEntries = true
       }
 
+      // Include @manifest fragments if requested
+      const manifestFragments = parsed.get('@manifest')
+      const hasManifest = manifestFragments !== undefined
+
       selected = allFrames.filter((frame) => {
-        if (frame.isManifest) return false
+        if (frame.isManifest && frame.manifestFragmentIndex !== undefined) {
+          return hasManifest && manifestFragments!.has(frame.manifestFragmentIndex)
+        }
         if (frame.fileId === undefined) return false
         const missing = missingSetByFileId.get(frame.fileId)
         if (!missing) return false
-        // frame.number is 0-indexed per-file, matching our internal storage
         return missing.has(frame.number)
       })
 
-      const totalRequested = Array.from(missingSetByFileId.values())
-        .reduce((sum, s) => sum + s.size, 0)
-      label = `${totalRequested} frame(s) from ${missingSetByFileId.size} file(s)`
+      if (hasManifest) {
+        labelParts.push(`${manifestFragments!.size} manifest fragment(s)`)
+      }
+      if (hasFileEntries) {
+        const totalRequested = Array.from(missingSetByFileId.values())
+          .reduce((sum, s) => sum + s.size, 0)
+        labelParts.push(`${totalRequested} frame(s) from ${missingSetByFileId.size} file(s)`)
+      }
     } else {
-      // File mode: data frames only, 0-indexed internal numbers
+      // File mode: data frames + optional @manifest
       const missingFrames = parsed.get('')
-      if (!missingFrames || missingFrames.size === 0) {
-        setState((prev) => ({ ...prev, error: 'No frame numbers specified' }))
+      const manifestRequested = parsed.has('@manifest')
+
+      if ((!missingFrames || missingFrames.size === 0) && !manifestRequested) {
+        setState((prev) => ({ ...prev, error: 'No frames specified' }))
         return
       }
 
       selected = allFrames.filter((frame) => {
-        // Skip manifest (frame 0, isManifest=true) and only include data frames
-        if (frame.isManifest) return false
+        if (frame.isManifest) {
+          return manifestRequested
+        }
         // frame.number is 1-indexed for v1 data frames
-        // missingFrames contains 0-indexed numbers, so missingFrames.has(frame.number - 1)
-        return missingFrames.has(frame.number - 1)
+        return missingFrames ? missingFrames.has(frame.number - 1) : false
       })
 
-      label = `${selected.length} frame(s)`
+      if (manifestRequested) labelParts.push('manifest')
+      if (missingFrames && missingFrames.size > 0) {
+        labelParts.push(`${missingFrames.size} data frame(s)`)
+      }
     }
 
     if (selected.length === 0) {
       setState((prev) => ({ ...prev, error: 'No matching frames to retransmit' }))
       return
     }
+
+    const label = labelParts.join(' + ')
 
     // Set retransmit mode
     retransmitFramesRef.current = selected

@@ -516,10 +516,22 @@ function TransmittingView({
           <p className="text-[10px] text-muted-foreground">
             Paste the missing frame list copied from the receiver to retransmit only those frames.
           </p>
+          <details className="text-[10px] text-muted-foreground">
+            <summary className="cursor-pointer hover:text-foreground">How to request retransmission</summary>
+            <div className="mt-1 p-2 bg-secondary/30 rounded-md font-mono whitespace-pre leading-relaxed">
+{`File:
+  2, 5-7, @manifest
+
+Folder:
+  @manifest: 2,5-7
+  src/main.go: 1-3,7
+  src/config.go: 2,5-6`}
+            </div>
+          </details>
           <div className="flex gap-2">
             <textarea
               className="flex-1 min-h-[60px] text-xs font-mono bg-secondary/50 border border-border/50 rounded-md p-2 resize-none focus:outline-none focus:ring-1 focus:ring-primary"
-              placeholder={state.isFolder ? 'src/main.go:1-3,7\nsrc/config.go:2,5-6' : '1-4,7,10-12'}
+              placeholder={state.isFolder ? '@manifest: 2,5-7\nsrc/main.go: 1-3,7\nsrc/config.go: 2,5-6' : '2, 5-7, @manifest'}
               value={missingInput}
               onChange={(e) => setMissingInput(e.target.value)}
             />
