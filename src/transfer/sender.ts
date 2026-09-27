@@ -38,6 +38,10 @@ export interface SenderTransfer {
   cyclesCompleted: number
   error: string | null
   isFolder: boolean
+  /** When set, the sender is in retransmit mode showing only missing frames */
+  retransmitFrameCount: number | null
+  /** Human-readable description of current retransmit target */
+  retransmitLabel: string | null
 }
 
 export function createSenderState(): SenderTransfer {
@@ -53,6 +57,8 @@ export function createSenderState(): SenderTransfer {
     cyclesCompleted: 0,
     error: null,
     isFolder: false,
+    retransmitFrameCount: null,
+    retransmitLabel: null,
   }
 }
 

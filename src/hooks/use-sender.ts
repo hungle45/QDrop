@@ -20,6 +20,7 @@ import type { Manifest, FolderManifest, ManifestFileEntry, EncodedFrame } from '
 import type { SenderTransfer, SenderState } from '@/transfer/sender'
 import { generateQrDataUrl, estimateMaxPayloadBytes, MANIFEST_QR_CONFIG, type QrGenConfig, type QrErrorLevel } from '@/qr/generator'
 import { groupFramesForDisplay, type QrDensity, type QrGridCell } from '@/qr/renderer'
+import { parseMissingFrameList } from '@/transfer/range-parser'
 
 export type { QrDensity }
 
@@ -39,6 +40,8 @@ interface UseSenderReturn {
   pauseTransmission: () => void
   resumeTransmission: () => void
   stopTransmission: () => void
+  submitMissingFrames: (input: string) => void
+  clearRetransmit: () => void
 }
 
 export const FRAME_INTERVALS = [
@@ -63,6 +66,8 @@ export function useSender(): UseSenderReturn {
     cyclesCompleted: 0,
     error: null,
     isFolder: false,
+    retransmitFrameCount: null,
+    retransmitLabel: null,
   })
 
   const [displayCells, setDisplayCells] = useState<QrGridCell[]>([])
@@ -74,6 +79,7 @@ export function useSender(): UseSenderReturn {
   const currentIndexRef = useRef(0)
   const cyclesRef = useRef(0)
   const framesRef = useRef<EncodedFrame[]>([])
+  const retransmitFramesRef = useRef<EncodedFrame[] | null>(null)
   const pauseRef = useRef(false)
   const intervalMsRef = useRef(DEFAULT_FRAME_INTERVAL)
   const selectedFileRef = useRef<File | null>(null)
@@ -96,7 +102,7 @@ export function useSender(): UseSenderReturn {
 
   const advanceFrames = useCallback(async () => {
     if (generatingRef.current) return
-    const frames = framesRef.current
+    const frames = retransmitFramesRef.current ?? framesRef.current
     if (frames.length === 0) return
 
     generatingRef.current = true
@@ -112,6 +118,17 @@ export function useSender(): UseSenderReturn {
       if (wrapped) {
         cyclesRef.current++
         setState((prev) => ({ ...prev, cyclesCompleted: cyclesRef.current }))
+
+        // If we completed a retransmit cycle, go back to normal transmission
+        if (retransmitFramesRef.current) {
+          retransmitFramesRef.current = null
+          currentIndexRef.current = 0
+          setState((prev) => ({
+            ...prev,
+            retransmitFrameCount: null,
+            retransmitLabel: null,
+          }))
+        }
       }
 
       const userConfig = buildUserConfig()
@@ -417,6 +434,104 @@ export function useSender(): UseSenderReturn {
     setDisplayCells([])
   }, [clearTimer])
 
+  const submitMissingFrames = useCallback((input: string) => {
+    if (!input.trim()) return
+
+    const allFrames = framesRef.current
+    if (allFrames.length === 0) return
+
+    const isFolder = allFrames.some((f) => f.fileId !== undefined)
+
+    const parsed = parseMissingFrameList(input)
+    if (parsed.size === 0) {
+      setState((prev) => ({ ...prev, error: 'Invalid missing frame list format' }))
+      return
+    }
+
+    let selected: EncodedFrame[]
+    let label: string
+
+    if (isFolder) {
+      // Folder mode: match file paths from the parsed input
+      const folderManifest = state.folderManifest
+      if (!folderManifest) {
+        setState((prev) => ({ ...prev, error: 'No folder manifest loaded' }))
+        return
+      }
+
+      const fileIdByPath = new Map<string, number>()
+      for (const file of folderManifest.files) {
+        fileIdByPath.set(file.path, file.fileId)
+      }
+
+      const missingSetByFileId = new Map<number, Set<number>>()
+      for (const [path, frames] of parsed) {
+        const fileId = fileIdByPath.get(path)
+        if (fileId === undefined) {
+          setState((prev) => ({ ...prev, error: `Unknown file path: ${path}` }))
+          return
+        }
+        missingSetByFileId.set(fileId, frames)
+      }
+
+      selected = allFrames.filter((frame) => {
+        if (frame.isManifest) return false
+        if (frame.fileId === undefined) return false
+        const missing = missingSetByFileId.get(frame.fileId)
+        if (!missing) return false
+        // frame.number is 0-indexed per-file, matching our internal storage
+        return missing.has(frame.number)
+      })
+
+      const totalRequested = Array.from(missingSetByFileId.values())
+        .reduce((sum, s) => sum + s.size, 0)
+      label = `${totalRequested} frame(s) from ${missingSetByFileId.size} file(s)`
+    } else {
+      // File mode: data frames only, 0-indexed internal numbers
+      const missingFrames = parsed.get('')
+      if (!missingFrames || missingFrames.size === 0) {
+        setState((prev) => ({ ...prev, error: 'No frame numbers specified' }))
+        return
+      }
+
+      selected = allFrames.filter((frame) => {
+        // Skip manifest (frame 0, isManifest=true) and only include data frames
+        if (frame.isManifest) return false
+        // frame.number is 1-indexed for v1 data frames
+        // missingFrames contains 0-indexed numbers, so missingFrames.has(frame.number - 1)
+        return missingFrames.has(frame.number - 1)
+      })
+
+      label = `${selected.length} frame(s)`
+    }
+
+    if (selected.length === 0) {
+      setState((prev) => ({ ...prev, error: 'No matching frames to retransmit' }))
+      return
+    }
+
+    // Set retransmit mode
+    retransmitFramesRef.current = selected
+    currentIndexRef.current = 0
+    cyclesRef.current = 0
+    setState((prev) => ({
+      ...prev,
+      retransmitFrameCount: selected.length,
+      retransmitLabel: label,
+      error: null,
+    }))
+  }, [state.folderManifest])
+
+  const clearRetransmit = useCallback(() => {
+    retransmitFramesRef.current = null
+    currentIndexRef.current = 0
+    setState((prev) => ({
+      ...prev,
+      retransmitFrameCount: null,
+      retransmitLabel: null,
+    }))
+  }, [])
+
   const setFrameInterval = useCallback((ms: number) => {
     setFrameIntervalState(ms)
     intervalMsRef.current = ms
@@ -457,6 +572,8 @@ export function useSender(): UseSenderReturn {
     pauseTransmission,
     resumeTransmission,
     stopTransmission,
+    submitMissingFrames,
+    clearRetransmit,
   }
 }
 

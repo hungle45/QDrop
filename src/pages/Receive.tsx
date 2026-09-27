@@ -1,15 +1,21 @@
-import { useCallback } from 'react'
+import { useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, Camera, ScanLine, Download, RotateCcw, CheckCircle2, XCircle, LoaderCircle } from 'lucide-react'
+import { ArrowLeft, Camera, ScanLine, Download, RotateCcw, CheckCircle2, XCircle, LoaderCircle, Copy, Check } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import { Separator } from '@/components/ui/separator'
 import { useReceiver } from '@/hooks/use-receiver'
-import type { Manifest } from '@/protocol'
-import type { ReceiverTransfer } from '@/transfer/receiver'
+import type { Manifest, FolderManifest } from '@/protocol'
+import type { ReceiverTransfer, FileProgress } from '@/transfer/receiver'
 import { FolderTree } from '@/components/FolderTree'
+import {
+  computeMissingFramesFile,
+  computeMissingFramesFolder,
+  formatMissingFrameList,
+  formatDisplayMissingFrames,
+} from '@/transfer/range-parser'
 
 function formatSize(bytes: number): string {
   if (bytes === 0) return '0 B'
@@ -181,6 +187,7 @@ function ScanningView({
                 </div>
               </>
             )}
+            <MissingFramesFolder fileProgress={state.fileProgress} />
           </CardContent>
         </Card>
       ) : isV1 ? (
@@ -223,6 +230,7 @@ function ScanningView({
                 <p className="font-mono text-foreground">{state.invalidCount}</p>
               </div>
             </div>
+            <MissingFramesFile receivedFrames={state.receivedFrames} totalFrames={state.totalFrames} />
           </CardContent>
         </Card>
       ) : (
@@ -385,6 +393,118 @@ function FailedView({ error, onRetry }: { error: string | null; onRetry: () => v
         </CardContent>
       </Card>
     </div>
+  )
+}
+
+function MissingFramesFile({
+  receivedFrames,
+  totalFrames,
+}: {
+  receivedFrames: Map<number, Uint8Array>
+  totalFrames: number
+}) {
+  const { missingSet, displayText, copyText, hasMissing } = useMemo(() => {
+    const missing = computeMissingFramesFile(receivedFrames, totalFrames)
+    if (missing.size === 0) {
+      return { missingSet: missing, displayText: '', copyText: '', hasMissing: false }
+    }
+    const copyText = formatMissingFrameList(new Map([['', missing]]))
+    const displayText = formatDisplayMissingFrames(new Map([['', missing]]))
+    return { missingSet: missing, displayText, copyText, hasMissing: true }
+  }, [receivedFrames, totalFrames])
+
+  const [copied, setCopied] = useState(false)
+
+  const handleCopy = useCallback(async () => {
+    if (!copyText) return
+    await navigator.clipboard.writeText(copyText)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
+  }, [copyText])
+
+  if (!hasMissing) return null
+
+  return (
+    <>
+      <Separator />
+      <div className="space-y-2">
+        <p className="text-xs font-medium text-foreground uppercase tracking-wider">
+          Missing Frames
+        </p>
+        <div className="flex items-center gap-2">
+          <code className="text-xs font-mono text-foreground flex-1">
+            {displayText}
+          </code>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-6 shrink-0"
+            onClick={handleCopy}
+            title={copied ? 'Copied!' : 'Copy missing frame ranges'}
+          >
+            {copied ? (
+              <Check className="size-3 text-green-500" />
+            ) : (
+              <Copy className="size-3 text-muted-foreground" />
+            )}
+          </Button>
+        </div>
+      </div>
+    </>
+  )
+}
+
+function MissingFramesFolder({
+  fileProgress,
+}: {
+  fileProgress: Map<number, FileProgress>
+}) {
+  const { missingFiles, displayText, copyText, hasMissing } = useMemo(() => {
+    const missing = computeMissingFramesFolder(fileProgress)
+    if (missing.size === 0) {
+      return { missingFiles: missing, displayText: '', copyText: '', hasMissing: false }
+    }
+    const copyText = formatMissingFrameList(missing)
+    const displayText = formatDisplayMissingFrames(missing)
+    return { missingFiles: missing, displayText, copyText, hasMissing: true }
+  }, [fileProgress])
+
+  const [copied, setCopied] = useState(false)
+
+  const handleCopy = useCallback(async () => {
+    if (!copyText) return
+    await navigator.clipboard.writeText(copyText)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
+  }, [copyText])
+
+  if (!hasMissing) return null
+
+  return (
+    <>
+      <Separator />
+      <div className="space-y-2">
+        <p className="text-xs font-medium text-foreground uppercase tracking-wider">
+          Missing Frames
+        </p>
+        <pre className="text-xs font-mono text-foreground whitespace-pre-wrap leading-relaxed">
+          {displayText}
+        </pre>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="gap-1.5 h-7 text-xs"
+          onClick={handleCopy}
+        >
+          {copied ? (
+            <Check className="size-3 text-green-500" />
+          ) : (
+            <Copy className="size-3" />
+          )}
+          {copied ? 'Copied!' : 'Copy'}
+        </Button>
+      </div>
+    </>
   )
 }
 

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, Upload, Play, Pause, Square, QrCode, Gauge, Folder as FolderIcon } from 'lucide-react'
+import { ArrowLeft, Upload, Play, Pause, Square, QrCode, Gauge, Folder as FolderIcon, Copy, SendHorizonal, RotateCcw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -14,6 +14,8 @@ import { useSender, FRAME_INTERVALS } from '@/hooks/use-sender'
 import { QR_ERROR_LEVELS, QR_VERSION_PRESETS } from '@/qr/generator'
 import type { QrErrorLevel } from '@/qr/generator'
 import { FileList } from '@/components/FolderTree'
+import { formatDisplayMissingFrames, formatMissingFrameList, computeMissingFramesFile, computeMissingFramesFolder } from '@/transfer/range-parser'
+import type { FileProgress } from '@/transfer/receiver'
 
 function formatSize(bytes: number): string {
   if (bytes === 0) return '0 B'
@@ -41,6 +43,8 @@ export default function Send() {
     pauseTransmission,
     resumeTransmission,
     stopTransmission,
+    submitMissingFrames,
+    clearRetransmit,
   } = useSender()
 
   const [dragOver, setDragOver] = useState(false)
@@ -147,6 +151,8 @@ export default function Send() {
             qrScale={qrScale}
             onQrScaleChange={setQrScale}
             qrConfig={qrConfig}
+            onSubmitMissingFrames={submitMissingFrames}
+            onClearRetransmit={clearRetransmit}
           />
         )}
 
@@ -440,8 +446,10 @@ function TransmittingView({
   qrScale,
   onQrScaleChange,
   qrConfig,
+  onSubmitMissingFrames,
+  onClearRetransmit,
 }: {
-  state: { totalFrames: number; cyclesCompleted: number; file: File | null; files: File[] | null; isFolder: boolean }
+  state: { totalFrames: number; cyclesCompleted: number; file: File | null; files: File[] | null; isFolder: boolean; retransmitFrameCount: number | null; retransmitLabel: string | null; error: string | null; folderManifest: FolderManifest | null; manifest: Manifest | null }
   manifest: Manifest | null
   folderManifest: FolderManifest | null
   displayCells: QrGridCell[]
@@ -455,7 +463,10 @@ function TransmittingView({
   qrScale: number
   onQrScaleChange: (scale: number) => void
   qrConfig: { errorCorrectionLevel: QrErrorLevel; version?: number }
+  onSubmitMissingFrames: (input: string) => void
+  onClearRetransmit: () => void
 }) {
+  const [missingInput, setMissingInput] = useState('')
   return (
     <div className="space-y-4">
       <Card>
@@ -496,6 +507,62 @@ function TransmittingView({
           </CardContent>
         </Card>
       )}
+
+      {/* Missing frame retransmission */}
+      <Card>
+        <CardContent className="pt-3 pb-3 space-y-2">
+          <p className="text-xs font-medium text-foreground uppercase tracking-wider">
+            Missing Frame Retransmission
+          </p>
+          <p className="text-[10px] text-muted-foreground">
+            Paste the missing frame list copied from the receiver to retransmit only those frames.
+          </p>
+          <div className="flex gap-2">
+            <textarea
+              className="flex-1 min-h-[60px] text-xs font-mono bg-secondary/50 border border-border/50 rounded-md p-2 resize-none focus:outline-none focus:ring-1 focus:ring-primary"
+              placeholder={state.isFolder ? 'src/main.go:1-3,7\nsrc/config.go:2,5-6' : '1-4,7,10-12'}
+              value={missingInput}
+              onChange={(e) => setMissingInput(e.target.value)}
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5 h-7 text-xs"
+              onClick={() => {
+                onSubmitMissingFrames(missingInput)
+                setMissingInput('')
+              }}
+              disabled={!missingInput.trim()}
+            >
+              <SendHorizonal className="size-3" />
+              Retransmit
+            </Button>
+            {state.retransmitFrameCount !== null && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="gap-1.5 h-7 text-xs"
+                onClick={onClearRetransmit}
+              >
+                <RotateCcw className="size-3" />
+                Clear
+              </Button>
+            )}
+          </div>
+          {state.retransmitFrameCount !== null && (
+            <div className="text-xs text-blue-500 font-mono">
+              Retransmitting {state.retransmitLabel} &middot; cycle {state.cyclesCompleted + 1}
+            </div>
+          )}
+          {state.error && (
+            <div className="text-xs text-red-500">
+              {state.error}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardContent className="pt-6 pb-6 space-y-4">
