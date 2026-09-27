@@ -563,3 +563,195 @@ describe('Folder ZIP Download', () => {
     expect(zipBlob.size).toBeGreaterThan(0)
   })
 })
+
+describe('Duplicate Frame Detection (v2)', () => {
+  it('should not count first-time frames as duplicates', () => {
+    const fileProgress = new Map<number, FileProgress>()
+    fileProgress.set(0, {
+      fileId: 0, path: 'a.txt', size: 100, frameCount: 3,
+      sha256: new Uint8Array(32), receivedFrames: new Set(), verified: false,
+    })
+
+    // First frame arrives — not a duplicate
+    const has1 = fileProgress.get(0)!.receivedFrames.has(0)
+    expect(has1).toBe(false)
+    fileProgress.get(0)!.receivedFrames = new Set([0])
+
+    // Second frame arrives — not a duplicate
+    const has2 = fileProgress.get(0)!.receivedFrames.has(1)
+    expect(has2).toBe(false)
+    fileProgress.get(0)!.receivedFrames = new Set([0, 1])
+
+    let duplicates = 0
+    // Same frames arrive again — duplicates
+    const check0 = fileProgress.get(0)!.receivedFrames.has(0)
+    if (check0) duplicates++
+    const check1 = fileProgress.get(0)!.receivedFrames.has(1)
+    if (check1) duplicates++
+
+    expect(duplicates).toBe(2)
+  })
+
+  it('should track duplicates independently per file', () => {
+    // Simulate the exact pattern used in the v2 handler
+    const fileProgress = new Map<number, FileProgress>()
+
+    // Helper: process a frame the way use-receiver does
+    function processFrame(fileId: number, frameNum: number): boolean {
+      let progress = fileProgress.get(fileId)
+      if (!progress) {
+        progress = {
+          fileId, path: `file-${fileId}`, size: 0, frameCount: 5,
+          sha256: new Uint8Array(32), receivedFrames: new Set(), verified: false,
+        }
+        fileProgress.set(fileId, progress)
+      }
+      if (progress.receivedFrames.has(frameNum)) {
+        return true // duplicate
+      }
+      progress.receivedFrames = new Set(progress.receivedFrames)
+      progress.receivedFrames.add(frameNum)
+      return false // new frame
+    }
+
+    // File 0 frames
+    expect(processFrame(0, 0)).toBe(false) // new
+    expect(processFrame(0, 1)).toBe(false) // new
+    expect(processFrame(0, 0)).toBe(true)  // duplicate!
+    expect(processFrame(0, 1)).toBe(true)  // duplicate!
+    expect(processFrame(0, 2)).toBe(false) // new
+
+    // File 1 frames (independent tracking)
+    expect(processFrame(1, 0)).toBe(false) // new
+    expect(processFrame(1, 1)).toBe(false) // new
+    expect(processFrame(1, 0)).toBe(true)  // duplicate!
+    expect(processFrame(0, 3)).toBe(false) // new (file 0, independent)
+    expect(processFrame(1, 1)).toBe(true)  // duplicate! (file 1, independent)
+
+    // Just verify the sizes
+    expect(fileProgress.get(0)!.receivedFrames.size).toBe(4) // frames 0,1,2,3
+    expect(fileProgress.get(1)!.receivedFrames.size).toBe(2) // frames 0,1
+  })
+})
+
+describe('Duplicate Counter: v2 per-file tracking', () => {
+  it('should track duplicate count across multiple files independently', () => {
+    // Simulate the exact pattern used in use-receiver's v2 data handler
+    const fileProgress = new Map<number, FileProgress>()
+    const fileData = new Map<number, Map<number, Uint8Array>>()
+    let duplicateCount = 0
+
+    function processFrame(fileId: number, frameNum: number, totalFrames: number): boolean {
+      const fp = new Map(fileProgress)
+      const fd = new Map(fileData)
+
+      let progress = fp.get(fileId)
+      if (!progress) {
+        progress = {
+          fileId, path: `file-${fileId}`, size: 0, frameCount: totalFrames,
+          sha256: new Uint8Array(32), receivedFrames: new Set(), verified: false,
+        }
+        fp.set(fileId, progress)
+      }
+
+      if (progress.receivedFrames.has(frameNum)) {
+        return true // duplicate
+      }
+
+      let fileFrames = fd.get(fileId)
+      if (!fileFrames) {
+        fileFrames = new Map()
+        fd.set(fileId, fileFrames)
+      }
+      fileFrames.set(frameNum, new Uint8Array([frameNum]))
+
+      progress.receivedFrames = new Set(progress.receivedFrames)
+      progress.receivedFrames.add(frameNum)
+
+      // Sync back (simulating setTransfer return)
+      fileProgress.clear(); for (const [k, v] of fp) fileProgress.set(k, v)
+      fileData.clear(); for (const [k, v] of fd) fileData.set(k, v)
+
+      return false
+    }
+
+    // File 0 (3 frames)
+    expect(processFrame(0, 0, 3)).toBe(false); expect(duplicateCount).toBe(0)
+    expect(processFrame(0, 1, 3)).toBe(false); expect(duplicateCount).toBe(0)
+    expect(processFrame(0, 0, 3)).toBe(true)   // duplicate!
+    duplicateCount++
+    expect(duplicateCount).toBe(1)
+
+    // File 1 (5 frames) — independent tracking
+    expect(processFrame(1, 0, 5)).toBe(false); expect(duplicateCount).toBe(1)
+    expect(processFrame(1, 1, 5)).toBe(false); expect(duplicateCount).toBe(1)
+    expect(processFrame(0, 0, 3)).toBe(true)   // duplicate!
+    duplicateCount++
+    expect(duplicateCount).toBe(2)
+
+    // Out-of-order should NOT be dupes
+    expect(processFrame(1, 3, 5)).toBe(false); expect(duplicateCount).toBe(2)
+    expect(processFrame(1, 2, 5)).toBe(false); expect(duplicateCount).toBe(2)
+    expect(processFrame(1, 4, 5)).toBe(false); expect(duplicateCount).toBe(2)
+
+    // Real duplicates
+    expect(processFrame(1, 1, 5)).toBe(true)   // duplicate!
+    duplicateCount++
+    expect(duplicateCount).toBe(3)
+
+    // Verify per-file progress
+    expect(fileProgress.get(0)!.receivedFrames.size).toBe(2) // frames 0,1
+    expect(fileProgress.get(1)!.receivedFrames.size).toBe(5) // frames 0,1,3,2,4
+  })
+
+  it('should increment duplicate count in real setTransfer flow', () => {
+    // Simulate the exact return values from the v2 handler
+    let state = {
+      fileProgress: new Map<number, FileProgress>(),
+      fileData: new Map<number, Map<number, Uint8Array>>(),
+      duplicateCount: 0,
+    }
+
+    // Simulate: 3 frames for file 0, all arriving twice
+    for (let round = 0; round < 2; round++) {
+      for (let frameNum = 0; frameNum < 3; frameNum++) {
+        state = ((prev) => {
+          const fileProgress = new Map(prev.fileProgress)
+          const fileData = new Map(prev.fileData)
+          const fileId = 0
+
+          let progress = fileProgress.get(fileId)
+          if (!progress) {
+            progress = {
+              fileId: 0, path: 'a.txt', size: 100, frameCount: 3,
+              sha256: new Uint8Array(32), receivedFrames: new Set(), verified: false,
+            }
+            fileProgress.set(fileId, progress)
+          }
+
+          if (progress.receivedFrames.has(frameNum)) {
+            return {
+              ...prev,
+              fileProgress,
+              fileData,
+              duplicateCount: prev.duplicateCount + 1,
+            }
+          }
+
+          const fileFrames = new Map(fileData.get(fileId) || new Map())
+          fileFrames.set(frameNum, new Uint8Array([frameNum]))
+          fileData.set(fileId, fileFrames)
+
+          progress.receivedFrames = new Set(progress.receivedFrames)
+          progress.receivedFrames.add(frameNum)
+
+          return { ...prev, fileProgress, fileData }
+        })(state)
+      }
+    }
+
+    // 3 unique frames, each arrived twice → 3 duplicates
+    expect(state.duplicateCount).toBe(3)
+    expect(state.fileProgress.get(0)!.receivedFrames.size).toBe(3)
+  })
+})

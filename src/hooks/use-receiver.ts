@@ -148,7 +148,8 @@ export function useReceiver(): UseReceiverReturn {
     if (decoded.type === 'data') {
       setTransfer((prev) => {
         if (isDuplicateFrame(prev.receivedFrames, decoded.frame)) {
-          return { ...prev, duplicateCount: prev.duplicateCount + 1 }
+          const updated = new Map(prev.receivedFrames)
+          return { ...prev, receivedFrames: updated, duplicateCount: prev.duplicateCount + 1 }
         }
 
         const updated = new Map(prev.receivedFrames)
@@ -200,7 +201,12 @@ export function useReceiver(): UseReceiverReturn {
 
         // Check duplicate per-file
         if (progress.receivedFrames.has(fileFrameNumber)) {
-          return { ...prev, duplicateCount: prev.duplicateCount + 1 }
+          return {
+            ...prev,
+            fileProgress,
+            fileData,
+            duplicateCount: prev.duplicateCount + 1,
+          }
         }
 
         // Store the frame data
