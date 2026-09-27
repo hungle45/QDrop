@@ -107,6 +107,13 @@ export default function Send() {
             <FolderPreparingView
               folderManifest={state.folderManifest}
               onStart={startTransmission}
+              density={density}
+              onDensityChange={setDensity}
+              frameInterval={frameInterval}
+              onFrameIntervalChange={setFrameInterval}
+              qrConfig={qrConfig}
+              onQrErrorLevelChange={setQrErrorLevel}
+              onQrVersionChange={setQrVersion}
             />
           ) : (
             <PreparingView
@@ -246,9 +253,23 @@ function FileSelector({
 function FolderPreparingView({
   folderManifest,
   onStart,
+  density,
+  onDensityChange,
+  frameInterval,
+  onFrameIntervalChange,
+  qrConfig,
+  onQrErrorLevelChange,
+  onQrVersionChange,
 }: {
   folderManifest: FolderManifest | null
   onStart: () => void
+  density: QrDensity
+  onDensityChange: (d: QrDensity) => void
+  frameInterval: number
+  onFrameIntervalChange: (ms: number) => void
+  qrConfig: { errorCorrectionLevel: QrErrorLevel; version?: number }
+  onQrErrorLevelChange: (level: QrErrorLevel) => void
+  onQrVersionChange: (v: number | undefined) => void
 }) {
   if (!folderManifest) {
     return (
@@ -299,6 +320,24 @@ function FolderPreparingView({
             <span className="text-muted-foreground">Total Frames</span>
             <span className="font-mono text-foreground">{totalFrames}</span>
           </div>
+
+          <Separator />
+
+          <SpeedControl
+            frameInterval={frameInterval}
+            onFrameIntervalChange={onFrameIntervalChange}
+          />
+
+          <QrDensityControl
+            density={density}
+            onDensityChange={onDensityChange}
+          />
+
+          <QrConfigControl
+            config={qrConfig}
+            onErrorLevelChange={onQrErrorLevelChange}
+            onVersionChange={onQrVersionChange}
+          />
 
           <Button className="w-full gap-2" onClick={onStart}>
             <Play className="size-4" />
