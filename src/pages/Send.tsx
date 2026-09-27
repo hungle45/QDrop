@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, Upload, Play, Pause, Square, QrCode, Gauge, Folder as FolderIcon, SendHorizonal, RotateCcw } from 'lucide-react'
+import { ArrowLeft, Upload, Play, Pause, Square, QrCode, Gauge, Folder as FolderIcon, SendHorizonal, RotateCcw, FilterX, Eye, EyeOff } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -13,7 +13,11 @@ import { QrRenderer, type QrDensity, type QrGridCell } from '@/qr/renderer'
 import { useSender, FRAME_INTERVALS } from '@/hooks/use-sender'
 import { QR_ERROR_LEVELS, QR_VERSION_PRESETS } from '@/qr/generator'
 import type { QrErrorLevel } from '@/qr/generator'
-import { FileList, SenderFolderTree } from '@/components/FolderTree'
+import { Switch } from '@/components/ui/switch'
+import { Label } from '@/components/ui/label'
+import { FileList } from '@/components/FolderTree'
+import { SenderFolderTree } from '@/components/SenderFolderTree'
+import { RemovableFileTree } from '@/components/RemovableFileTree'
 
 
 function formatSize(bytes: number): string {
@@ -22,6 +26,15 @@ function formatSize(bytes: number): string {
   const i = Math.floor(Math.log(bytes) / Math.log(1024))
   const size = bytes / Math.pow(1024, i)
   return `${size.toFixed(i === 0 ? 0 : 1)} ${units[i]}`
+}
+
+function formatDuration(ms: number): string {
+  const totalSeconds = Math.round(ms / 1000)
+  if (totalSeconds < 60) return `~${totalSeconds}s`
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+  if (seconds === 0) return `~${minutes}m`
+  return `~${minutes}m ${seconds.toString().padStart(2, '0')}s`
 }
 
 export default function Send() {
@@ -44,6 +57,9 @@ export default function Send() {
     stopTransmission,
     submitMissingFrames,
     clearRetransmit,
+    folderFilter,
+    setRespectGitignore,
+    toggleRemovePath,
   } = useSender()
 
   const [dragOver, setDragOver] = useState(false)
@@ -109,7 +125,11 @@ export default function Send() {
           state.isFolder ? (
             <FolderPreparingView
               folderManifest={state.folderManifest}
+              folderFilter={folderFilter}
+              framesLoading={state.framesLoading}
               onStart={startTransmission}
+              onRespectGitignoreChange={setRespectGitignore}
+              onToggleRemovePath={toggleRemovePath}
               density={density}
               onDensityChange={setDensity}
               frameInterval={frameInterval}
@@ -257,7 +277,11 @@ function FileSelector({
 
 function FolderPreparingView({
   folderManifest,
+  folderFilter,
+  framesLoading,
   onStart,
+  onRespectGitignoreChange,
+  onToggleRemovePath,
   density,
   onDensityChange,
   frameInterval,
@@ -267,7 +291,11 @@ function FolderPreparingView({
   onQrVersionChange,
 }: {
   folderManifest: FolderManifest | null
+  folderFilter: import('@/hooks/use-sender').FolderFilterState
+  framesLoading: boolean
   onStart: () => void
+  onRespectGitignoreChange: (respect: boolean) => void
+  onToggleRemovePath: (path: string) => void
   density: QrDensity
   onDensityChange: (d: QrDensity) => void
   frameInterval: number
@@ -276,54 +304,141 @@ function FolderPreparingView({
   onQrErrorLevelChange: (level: QrErrorLevel) => void
   onQrVersionChange: (v: number | undefined) => void
 }) {
-  if (!folderManifest) {
+  const totalSize = folderFilter.filteredFiles
+    ? folderFilter.filteredFiles.reduce((sum, f) => sum + f.size, 0)
+    : 0
+  const totalFrames = folderManifest
+    ? folderManifest.files.reduce((sum, f) => sum + f.frameCount, 0)
+    : 0
+  const filteredCount = folderFilter.filteredFileCount
+  const removedCount = folderFilter.rawFiles
+    ? folderFilter.rawFiles.length - filteredCount
+    : 0
+
+  // Build file list for RemovableFileTree
+  const fileList = folderManifest
+    ? folderManifest.files.map((f) => ({
+        path: f.path,
+        size: f.size,
+        frameCount: f.frameCount,
+      }))
+    : []
+  const removedPathSet = new Set(folderFilter.removedPaths)
+  const removedPathCount = removedPathSet.size
+
+  // Estimated minimum transfer time
+  const estimatedTime =
+    !framesLoading && totalFrames > 0
+      ? totalFrames * frameInterval
+      : null
+
+  if (filteredCount === 0 && !framesLoading) {
     return (
-      <div className="flex items-center justify-center h-48 text-sm text-muted-foreground">
-        Preparing folder...
+      <div className="flex flex-col items-center justify-center h-48 text-sm text-muted-foreground gap-2">
+        <p>All files have been filtered out.</p>
+        {folderFilter.gitignoreRules && (
+          <p className="text-xs text-muted-foreground">
+            Try disabling "Respect .gitignore" above or re-add removed files.
+          </p>
+        )}
       </div>
     )
   }
 
-  const totalFrames = folderManifest.files.reduce((sum, f) => sum + f.frameCount, 0)
-  const totalSize = folderManifest.files.reduce((sum, f) => sum + f.size, 0)
-
-  const fileList = folderManifest.files.map(f => ({
-    path: f.path,
-    size: f.size,
-    frameCount: f.frameCount,
-  }))
+  const hasGitignore = folderFilter.gitignoreRules !== null
+  const rootName = folderManifest?.rootName ?? 'folder'
+  const fileCount = folderManifest?.files.length ?? filteredCount
 
   return (
     <div className="space-y-6 pt-8">
       <Card>
         <CardContent className="pt-6 pb-6 space-y-4">
+          {/* Header */}
           <div className="flex items-center gap-3">
             <div className="size-10 rounded-lg bg-secondary flex items-center justify-center">
               <FolderIcon className="size-5 text-foreground" />
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium text-foreground truncate">
-                {folderManifest.rootName}/
+                {rootName}/
               </p>
               <p className="text-xs text-muted-foreground">
-                {folderManifest.files.length} files &middot; {formatSize(totalSize)} &middot; {totalFrames} frames
+                {fileCount} files &middot; {formatSize(totalSize)}
               </p>
             </div>
           </div>
 
           <Separator />
 
-          <FileList rootName={folderManifest.rootName} files={fileList} />
+          {/* Filter controls */}
+          {hasGitignore && (
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <FilterX className="size-3.5 text-muted-foreground" />
+                <Label htmlFor="gitignore-toggle" className="text-xs cursor-pointer">
+                  Respect .gitignore
+                </Label>
+              </div>
+              <Switch
+                id="gitignore-toggle"
+                checked={folderFilter.respectGitignore}
+                onCheckedChange={onRespectGitignoreChange}
+              />
+            </div>
+          )}
 
+          {/* Removed files count */}
+          {removedCount > 0 && (
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <EyeOff className="size-3" />
+              <span>
+                {removedCount} file{removedCount !== 1 ? 's' : ''} excluded
+              </span>
+            </div>
+          )}
+
+          {/* File tree with remove buttons */}
+          <RemovableFileTree
+            rootName={rootName}
+            files={fileList}
+            removedPaths={removedPathSet}
+            onRemove={onToggleRemovePath}
+            className="max-h-60"
+          />
+
+          {/* Stats */}
           <Separator />
 
           <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
             <span className="text-muted-foreground">Files</span>
-            <span className="font-mono text-foreground">{folderManifest.files.length}</span>
+            <span className="font-mono text-foreground">{filteredCount}</span>
+            {removedCount > 0 && (
+              <>
+                <span className="text-muted-foreground">Excluded</span>
+                <span className="font-mono text-muted-foreground/60">{removedCount}</span>
+              </>
+            )}
             <span className="text-muted-foreground">Total Size</span>
             <span className="font-mono text-foreground">{formatSize(totalSize)}</span>
             <span className="text-muted-foreground">Total Frames</span>
-            <span className="font-mono text-foreground">{totalFrames}</span>
+            <span className="font-mono text-foreground">
+              {framesLoading ? (
+                <span className="flex items-center gap-1.5 text-muted-foreground/60">
+                  <span className="inline-block size-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                  Calculating…
+                </span>
+              ) : (
+                totalFrames.toLocaleString()
+              )}
+            </span>
+            {estimatedTime !== null && (
+              <>
+                <span className="text-muted-foreground">Min. Transfer Time</span>
+                <span className="font-mono text-foreground">
+                  {formatDuration(estimatedTime)}
+                </span>
+              </>
+            )}
           </div>
 
           <Separator />
@@ -636,7 +751,7 @@ Folder:
                   ? undefined
                   : displayCells[0]?.frame.number
               }
-              className="max-h-48"
+              className="max-h-60"
             />
           </CardContent>
         </Card>

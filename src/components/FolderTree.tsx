@@ -8,7 +8,7 @@ import { ChevronRight, ChevronDown, File, Folder, CheckCircle2, XCircle } from '
 import { cn } from '@/lib/utils'
 import type { FileProgress } from '@/transfer/receiver'
 
-interface TreeNode {
+export interface TreeNode {
   name: string
   type: 'file' | 'folder'
   path?: string
@@ -26,7 +26,7 @@ interface FolderTreeProps {
 /**
  * Build a tree structure from flat file paths with progress data.
  */
-function buildTree(rootName: string, fileProgress: Map<number, FileProgress>): TreeNode {
+export function buildTree(rootName: string, fileProgress: Map<number, FileProgress>): TreeNode {
   const root: TreeNode = {
     name: rootName,
     type: 'folder',
@@ -56,6 +56,7 @@ function buildTree(rootName: string, fileProgress: Map<number, FileProgress>): T
           folder = {
             name: part,
             type: 'folder',
+            path: parts.slice(0, i + 1).join('/'),
             children: [],
           }
           current.children.push(folder)
@@ -226,121 +227,5 @@ export function FileList({ rootName, files }: { rootName: string; files: { path:
   )
 }
 
-/**
- * SenderFolderTree — compact folder tree for the sender side that highlights
- * the file currently being transmitted.
- *
- * Accepts an `activeFileId` — when set, the corresponding file node is
- * highlighted with a distinct background.  When undefined (manifest frame),
- * no file is highlighted.
- */
-export function SenderFolderTree({
-  rootName,
-  files,
-  activeFileId,
-  currentFrameNumber,
-  className,
-}: {
-  rootName: string
-  files: { path: string; size: number; frameCount: number; fileId: number }[]
-  activeFileId: number | undefined
-  currentFrameNumber: number | undefined
-  className?: string
-}) {
-  // Build tree data on the fly with per-file state derived from the active-frame info
-  const tree = useMemo(() => {
-    const fileEntries = files.map((f) => ({
-      fileId: f.fileId,
-      path: f.path,
-      size: f.size,
-      frameCount: f.frameCount,
-      sha256: new Uint8Array(32),
-      receivedFrames: new Set<number>(),
-      verified: false,
-    }))
-    const progressMap = new Map<number, FileProgress>()
-    for (const fe of fileEntries) {
-      progressMap.set(fe.fileId, fe)
-    }
-    return buildTree(rootName, progressMap)
-  }, [rootName, files])
 
-  return (
-    <div className={cn('border border-border/50 rounded-md overflow-hidden text-xs', className)}>
-      <SenderTreeNode
-        node={tree}
-        depth={0}
-        activeFileId={activeFileId}
-        currentFrameNumber={currentFrameNumber}
-      />
-    </div>
-  )
-}
-
-interface SenderTreeNodeProps {
-  node: TreeNode
-  depth: number
-  activeFileId: number | undefined
-  currentFrameNumber: number | undefined
-}
-
-function SenderTreeNode({ node, depth, activeFileId, currentFrameNumber }: SenderTreeNodeProps) {
-  const isActive = node.type === 'file' && node.fileId !== undefined && node.fileId === activeFileId
-
-  if (node.type === 'file') {
-    const total = node.progress?.frameCount ?? 0
-    return (
-      <div
-        className={cn(
-          'flex items-center gap-2 py-0.5 px-1 rounded-none text-xs',
-          isActive ? 'bg-primary/10 text-foreground font-medium' : 'text-muted-foreground',
-        )}
-        style={{ paddingLeft: `${depth * 16 + 8}px` }}
-      >
-        <File
-          className={cn(
-            'size-3.5 shrink-0',
-            isActive ? 'text-primary' : 'text-muted-foreground',
-          )}
-        />
-        <span className={cn('truncate flex-1', isActive && 'text-foreground')}>
-          {node.name}
-        </span>
-        {isActive && currentFrameNumber !== undefined && total > 0 && (
-          <span className="font-mono tabular-nums shrink-0 text-primary">
-            {currentFrameNumber + 1}/{total}
-          </span>
-        )}
-      </div>
-    )
-  }
-
-  // Folder node — always expanded, no toggling for sender tree
-  return (
-    <div>
-      <div
-        className="flex items-center gap-1 py-0.5 px-1 text-muted-foreground text-xs"
-        style={{ paddingLeft: `${depth * 16 + 4}px` }}
-      >
-        <ChevronDown className="size-3.5 shrink-0" />
-        <Folder className="size-3.5 shrink-0" />
-        <span>{node.name}</span>
-        {node.children.length > 0 && (
-          <span className="ml-0.5">({node.children.length})</span>
-        )}
-      </div>
-      <div>
-        {node.children.map((child, i) => (
-          <SenderTreeNode
-            key={`${child.name}-${i}`}
-            node={child}
-            depth={depth + 1}
-            activeFileId={activeFileId}
-            currentFrameNumber={currentFrameNumber}
-          />
-        ))}
-      </div>
-    </div>
-  )
-}
 

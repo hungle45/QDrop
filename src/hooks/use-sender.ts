@@ -21,8 +21,34 @@ import type { SenderTransfer, SenderState } from '@/transfer/sender'
 import { generateQrDataUrl, estimateMaxPayloadBytes, MANIFEST_QR_CONFIG, type QrGenConfig, type QrErrorLevel } from '@/qr/generator'
 import { groupFramesForDisplay, type QrDensity, type QrGridCell } from '@/qr/renderer'
 import { parseMissingFrameList } from '@/transfer/range-parser'
+import {
+  findGitignoreFile,
+  readGitignoreContent,
+  getRelativePath,
+  filterByGitignore,
+  filterByRemovedPaths,
+  filterAlwaysExcluded,
+} from '@/filter/folder-filter'
+import { parseGitignore } from '@/filter/gitignore'
+import type { GitignoreRule } from '@/filter/gitignore'
 
 export type { QrDensity }
+
+/** Current folder filter state, exposed to the UI for controls and display. */
+export interface FolderFilterState {
+  /** Whether .gitignore rules are being applied. */
+  respectGitignore: boolean
+  /** Relative paths the user has explicitly removed. */
+  removedPaths: string[]
+  /** Parsed .gitignore rules (null if no .gitignore file found). */
+  gitignoreRules: GitignoreRule[] | null
+  /** File count after filtering (0 means all files were removed). */
+  filteredFileCount: number
+  /** The filtered file list — what will be transferred. */
+  filteredFiles: File[] | null
+  /** The raw (unfiltered) file list from the directory picker. */
+  rawFiles: File[] | null
+}
 
 interface UseSenderReturn {
   state: SenderTransfer
@@ -42,6 +68,12 @@ interface UseSenderReturn {
   stopTransmission: () => void
   submitMissingFrames: (input: string) => void
   clearRetransmit: () => void
+  /** Folder filter state for UI controls. */
+  folderFilter: FolderFilterState
+  /** Toggle whether .gitignore rules are respected. Triggers re-prepare. */
+  setRespectGitignore: (respect: boolean) => void
+  /** Add or remove a path from the removal set. Triggers re-prepare. */
+  toggleRemovePath: (path: string) => void
 }
 
 export const FRAME_INTERVALS = [
@@ -68,6 +100,7 @@ export function useSender(): UseSenderReturn {
     isFolder: false,
     retransmitFrameCount: null,
     retransmitLabel: null,
+    framesLoading: false,
   })
 
   const [displayCells, setDisplayCells] = useState<QrGridCell[]>([])
@@ -75,6 +108,16 @@ export function useSender(): UseSenderReturn {
   const [frameInterval, setFrameIntervalState] = useState<number>(DEFAULT_FRAME_INTERVAL)
   const [qrErrorLevel, setQrErrorLevel] = useState<QrErrorLevel>('L')
   const [qrVersion, setQrVersion] = useState<number | undefined>(15)
+
+  // Filter state
+  const [folderFilter, setFolderFilter] = useState<FolderFilterState>({
+    respectGitignore: true,
+    removedPaths: [],
+    gitignoreRules: null,
+    filteredFileCount: 0,
+    filteredFiles: null,
+    rawFiles: null,
+  })
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const currentIndexRef = useRef(0)
   const cyclesRef = useRef(0)
@@ -85,6 +128,22 @@ export function useSender(): UseSenderReturn {
   const selectedFileRef = useRef<File | null>(null)
   const selectedFilesRef = useRef<File[] | null>(null)
   const generatingRef = useRef(false)
+
+  // Refs for filter state (avoids stale closures in async operations)
+  const respectGitignoreRef = useRef(true)
+  const removedPathsRef = useRef<Set<string>>(new Set())
+  const gitignoreRulesRef = useRef<GitignoreRule[] | null>(null)
+  const filteredFilesRef = useRef<File[] | null>(null)
+  const rawFilesRef = useRef<File[] | null>(null)
+
+  // Cache for folder content that doesn't depend on QR config.
+  // When QR config changes we reuse this instead of re-hashing / re-detecting root name.
+  const folderContentCacheRef = useRef<{
+    files: File[]
+    transferId: Uint8Array
+    fileHashes: Map<string, Uint8Array>
+    rootName: string
+  } | null>(null)
 
   const buildUserConfig = useCallback((): QrGenConfig => ({
     errorCorrectionLevel: qrErrorLevel,
@@ -153,6 +212,275 @@ export function useSender(): UseSenderReturn {
     }, intervalMsRef.current)
   }, [clearTimer, advanceFrames])
 
+  /**
+   * Apply current filter settings (gitignore + removed paths) and update refs + state.
+   * Does NOT trigger frame preparation — use prepareFolderFrames for that.
+   */
+  const applyFilter = useCallback(() => {
+    const rawFiles = rawFilesRef.current
+    if (!rawFiles) return [] as File[]
+
+    const rules = gitignoreRulesRef.current
+    const removed = removedPathsRef.current
+    const respect = respectGitignoreRef.current
+
+    // Always exclude .git and other hard-coded paths
+    const withoutAlwaysExcluded = filterAlwaysExcluded(rawFiles)
+
+    // Apply .gitignore filter
+    const gitignoreFiltered = rules ? filterByGitignore(withoutAlwaysExcluded, rules, respect) : withoutAlwaysExcluded
+
+    // Apply user removals
+    const finalFiltered = filterByRemovedPaths(gitignoreFiltered, removed)
+
+    filteredFilesRef.current = finalFiltered
+
+    setFolderFilter((prev) => ({
+      ...prev,
+      filteredFileCount: finalFiltered.length,
+      filteredFiles: finalFiltered,
+      respectGitignore: respect,
+    }))
+
+    return finalFiltered
+  }, [])
+
+  /**
+   * Prepare folder frames from the current filtered files.
+   * Used by selectFolder and whenever filter state / QR config changes.
+   */
+  const prepareFolderFrames = useCallback(async () => {
+    const files = filteredFilesRef.current
+    if (!files || files.length === 0) {
+      // No files after filtering — update state without frames
+      setState((prev) => ({
+        ...prev,
+        state: 'ready',
+        folderManifest: null,
+        frames: [],
+        totalFrames: 0,
+        currentFrameIndex: 0,
+        cyclesCompleted: 0,
+        error: prev.error,
+      }))
+      return
+    }
+
+    // Mark frames as loading — the UI shows a local spinner on the frame count
+    // instead of a full-page "Preparing folder..." banner.
+    // We KEEP the existing folderManifest so the UI skeleton stays visible.
+    const existingCache = folderContentCacheRef.current
+    const needsHashing = !existingCache || files.some((f) => !existingCache.fileHashes.has(getRelativePath(f)))
+
+    setState((prev) => ({
+      ...prev,
+      state: needsHashing ? ('preparing' as SenderState) : prev.state,
+      framesLoading: true,
+    }))
+
+    try {
+      const config = buildUserConfig()
+      const maxPayload = estimateMaxPayloadBytes(config)
+      const transferId = existingCache?.transferId ?? crypto.getRandomValues(new Uint8Array(16))
+
+      let fileIdCounter = 0
+      const manifestFiles: ManifestFileEntry[] = []
+      const allChunks: { fileId: number; chunks: { index: number; data: Uint8Array }[]; file: File }[] = []
+
+      const fileHashes = new Map(existingCache?.fileHashes ?? [])
+
+      for (const file of files) {
+        const fileId = fileIdCounter++
+        const chunks = await chunkFile(file, maxPayload)
+        const relPath = getRelativePath(file)
+
+        if (!isPathSafe(relPath)) {
+          throw new Error(`Unsafe path: ${relPath}`)
+        }
+
+        // Reuse cached hash if available — skip expensive sha256 I/O
+        let fileHash = fileHashes.get(relPath)
+        if (!fileHash) {
+          fileHash = await sha256(file)
+          fileHashes.set(relPath, fileHash)
+        }
+
+        manifestFiles.push({
+          fileId,
+          path: relPath,
+          size: file.size,
+          frameCount: chunks.length,
+          sha256: fileHash,
+        })
+
+        allChunks.push({ fileId, chunks, file })
+      }
+
+      const rootName = existingCache?.rootName ?? deriveRootName(files)
+
+      // Update cache with latest filtered file list + accumulated hashes
+      folderContentCacheRef.current = {
+        files,
+        transferId,
+        fileHashes,
+        rootName,
+      }
+
+      const folderManifest: FolderManifest = {
+        transferId,
+        rootName,
+        files: manifestFiles,
+      }
+
+      const manifestBytes = serializeFolderManifest(folderManifest)
+      const maxManifestFragmentSize = Math.min(maxPayload, 800)
+      const manifestFragments = fragmentManifest(manifestBytes, maxManifestFragmentSize)
+
+      const manifestFrames: EncodedFrame[] = manifestFragments.map((frag, i) =>
+        createV2ManifestFrame(transferId, i, manifestFragments.length, frag),
+      )
+
+      const dataFrames: EncodedFrame[] = []
+      for (const { fileId, chunks: fileChunks } of allChunks) {
+        for (const chunk of fileChunks) {
+          dataFrames.push(
+            createV2DataFrame(transferId, fileId, chunk.index, fileChunks.length, chunk.data),
+          )
+        }
+      }
+
+      const frames = [...manifestFrames, ...dataFrames]
+      framesRef.current = frames
+      currentIndexRef.current = 0
+      cyclesRef.current = 0
+
+      setState((prev) => ({
+        ...prev,
+        state: 'ready',
+        folderManifest,
+        frames,
+        currentFrameIndex: 0,
+        totalFrames: frames.length,
+        cyclesCompleted: 0,
+        error: null,
+        framesLoading: false,
+      }))
+    } catch (err) {
+      setState((prev) => ({
+        ...prev,
+        state: 'ready',
+        error: err instanceof Error ? err.message : 'Failed to prepare folder',
+        framesLoading: false,
+      }))
+    }
+  }, [buildUserConfig])
+
+  /**
+   * Regenerate folder frames WITHOUT re-hashing or re-deriving metadata.
+   *
+   * Uses the cached folder content (sha256 hashes, transferId, root name)
+   * and only re-chunks files with the current QR payload size.
+   * Does NOT set 'preparing' state — avoids the "Preparing folder..." flash
+   * when the user only changes QR configuration.
+   *
+   * Falls back to a full prepareFolderFrames if the cache is missing.
+   */
+  const regenFolderFrames = useCallback(async () => {
+    const cache = folderContentCacheRef.current
+    if (!cache) {
+      // No cached content — need full preparation
+      await prepareFolderFrames()
+      return
+    }
+
+    const { files, fileHashes, transferId, rootName } = cache
+
+    setState((prev) => ({ ...prev, framesLoading: true }))
+
+    try {
+      const config = buildUserConfig()
+      const maxPayload = estimateMaxPayloadBytes(config)
+
+      let fileIdCounter = 0
+      const manifestFiles: ManifestFileEntry[] = []
+      const allChunks: { fileId: number; chunks: { index: number; data: Uint8Array }[]; file: File }[] = []
+
+      for (const file of files) {
+        const fileId = fileIdCounter++
+        const chunks = await chunkFile(file, maxPayload)
+        const relPath = getRelativePath(file)
+        const fileHash = fileHashes.get(relPath)
+
+        if (!fileHash) {
+          // Shouldn't happen unless cache is stale — fall back to full prep
+          await prepareFolderFrames()
+          return
+        }
+
+        if (!isPathSafe(relPath)) {
+          throw new Error(`Unsafe path: ${relPath}`)
+        }
+
+        manifestFiles.push({
+          fileId,
+          path: relPath,
+          size: file.size,
+          frameCount: chunks.length,
+          sha256: fileHash,
+        })
+
+        allChunks.push({ fileId, chunks, file })
+      }
+
+      const folderManifest: FolderManifest = {
+        transferId,
+        rootName,
+        files: manifestFiles,
+      }
+
+      const manifestBytes = serializeFolderManifest(folderManifest)
+      const maxManifestFragmentSize = Math.min(maxPayload, 800)
+      const manifestFragments = fragmentManifest(manifestBytes, maxManifestFragmentSize)
+
+      const manifestFrames: EncodedFrame[] = manifestFragments.map((frag, i) =>
+        createV2ManifestFrame(transferId, i, manifestFragments.length, frag),
+      )
+
+      const dataFrames: EncodedFrame[] = []
+      for (const { fileId, chunks: fileChunks } of allChunks) {
+        for (const chunk of fileChunks) {
+          dataFrames.push(
+            createV2DataFrame(transferId, fileId, chunk.index, fileChunks.length, chunk.data),
+          )
+        }
+      }
+
+      const frames = [...manifestFrames, ...dataFrames]
+      framesRef.current = frames
+      currentIndexRef.current = 0
+      cyclesRef.current = 0
+
+      setState((prev) => ({
+        ...prev,
+        state: 'ready',
+        folderManifest,
+        frames,
+        currentFrameIndex: 0,
+        totalFrames: frames.length,
+        cyclesCompleted: 0,
+        error: null,
+        framesLoading: false,
+      }))
+    } catch (err) {
+      setState((prev) => ({
+        ...prev,
+        state: 'ready',
+        error: err instanceof Error ? err.message : 'Failed to regenerate folder frames',
+        framesLoading: false,
+      }))
+    }
+  }, [buildUserConfig, prepareFolderFrames])
+
   // Track previous config to detect real changes
   const prevConfigRef = useRef({ errorLevel: qrErrorLevel, version: qrVersion })
 
@@ -161,7 +489,6 @@ export function useSender(): UseSenderReturn {
     const prev = prevConfigRef.current
     prevConfigRef.current = { errorLevel: qrErrorLevel, version: qrVersion }
 
-    if (prev.errorLevel === qrErrorLevel && prev.version === qrVersion) return
     if (prev.errorLevel === qrErrorLevel && prev.version === qrVersion) return
 
     const isFileMode = !!selectedFileRef.current && !selectedFilesRef.current
@@ -172,9 +499,10 @@ export function useSender(): UseSenderReturn {
 
     const doRegen = async () => {
       const config = buildUserConfig()
-      setState((prev) => ({ ...prev, state: 'preparing' as SenderState }))
-      try {
-        if (isFileMode) {
+      if (isFileMode) {
+        // Single-file mode: needs full re-chunk + re-hash
+        setState((prev) => ({ ...prev, state: 'preparing' as SenderState }))
+        try {
           const maxPayload = estimateMaxPayloadBytes(config)
           const chunks = await chunkFile(selectedFileRef.current!, maxPayload)
           const transferId = crypto.getRandomValues(new Uint8Array(16))
@@ -205,52 +533,12 @@ export function useSender(): UseSenderReturn {
             cyclesCompleted: 0,
             error: null,
           }))
-        } else {
-          const maxPayload = estimateMaxPayloadBytes(config)
-          const transferId = crypto.getRandomValues(new Uint8Array(16))
-          let fileIdCounter = 0
-          const manifestFiles: ManifestFileEntry[] = []
-          const allChunks: { fileId: number; chunks: { index: number; data: Uint8Array }[]; file: File }[] = []
-          for (const file of selectedFilesRef.current!) {
-            const fileId = fileIdCounter++
-            const chunks = await chunkFile(file, maxPayload)
-            const fileHash = await sha256(file)
-            const relPath = (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name
-            if (!isPathSafe(relPath)) throw new Error(`Unsafe path: ${relPath}`)
-            manifestFiles.push({ fileId, path: relPath, size: file.size, frameCount: chunks.length, sha256: fileHash })
-            allChunks.push({ fileId, chunks, file })
-          }
-          const rootName = deriveRootName(selectedFilesRef.current!)
-          const folderManifest: FolderManifest = { transferId, rootName, files: manifestFiles }
-          const manifestBytes = serializeFolderManifest(folderManifest)
-          const maxManifestFragmentSize = Math.min(maxPayload, 800)
-          const manifestFragments = fragmentManifest(manifestBytes, maxManifestFragmentSize)
-          const manifestFrames: EncodedFrame[] = manifestFragments.map((frag, i) =>
-            createV2ManifestFrame(transferId, i, manifestFragments.length, frag),
-          )
-          const dataFrames: EncodedFrame[] = []
-          for (const { fileId, chunks: fileChunks } of allChunks) {
-            for (const chunk of fileChunks) {
-              dataFrames.push(createV2DataFrame(transferId, fileId, chunk.index, fileChunks.length, chunk.data))
-            }
-          }
-          const frames = [...manifestFrames, ...dataFrames]
-          framesRef.current = frames
-          currentIndexRef.current = 0
-          cyclesRef.current = 0
-          setState((prev) => ({
-            ...prev,
-            state: 'ready',
-            folderManifest,
-            frames,
-            currentFrameIndex: 0,
-            totalFrames: frames.length,
-            cyclesCompleted: 0,
-            error: null,
-          }))
+        } catch {
+          setState((prev) => ({ ...prev, state: 'ready' as SenderState }))
         }
-      } catch {
-        setState((prev) => ({ ...prev, state: 'ready' as SenderState }))
+      } else {
+        // Folder mode: reuse cached hashes + transferId — no "Preparing folder..." flash
+        await regenFolderFrames()
       }
     }
     doRegen()
@@ -308,83 +596,69 @@ export function useSender(): UseSenderReturn {
   const selectFolder = useCallback(async (files: File[]) => {
     selectedFilesRef.current = files
     selectedFileRef.current = null
+    rawFilesRef.current = files
+
+    // New folder selection — clear cache so we re-hash all files
+    folderContentCacheRef.current = null
+
     setState((prev) => ({ ...prev, state: 'preparing', file: null, files, isFolder: true }))
 
     try {
-      const config = buildUserConfig()
-      const maxPayload = estimateMaxPayloadBytes(config)
-      const transferId = crypto.getRandomValues(new Uint8Array(16))
+      // --- Filtering step: detect .gitignore and apply rules ---
 
-      // Build folder manifest
-      let fileIdCounter = 0
-      const manifestFiles: ManifestFileEntry[] = []
-      const allChunks: { fileId: number; chunks: { index: number; data: Uint8Array }[]; file: File }[] = []
+      // Find and parse .gitignore
+      const gitignoreFile = findGitignoreFile(files)
+      let rules: GitignoreRule[] | null = null
 
-      for (const file of files) {
-        const fileId = fileIdCounter++
-        const chunks = await chunkFile(file, maxPayload)
-        const fileHash = await sha256(file)
-        const relPath = (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name
-
-        if (!isPathSafe(relPath)) {
-          throw new Error(`Unsafe path: ${relPath}`)
-        }
-
-        manifestFiles.push({
-          fileId,
-          path: relPath,
-          size: file.size,
-          frameCount: chunks.length,
-          sha256: fileHash,
-        })
-
-        allChunks.push({ fileId, chunks, file })
+      if (gitignoreFile) {
+        const content = await readGitignoreContent(gitignoreFile)
+        rules = parseGitignore(content)
       }
 
-      // Derive root name
+      gitignoreRulesRef.current = rules
+      const respect = respectGitignoreRef.current
+
+      // Always exclude .git and other hard-coded paths
+      const withoutAlwaysExcluded = filterAlwaysExcluded(files)
+
+      // Apply .gitignore filter (if enabled and rules exist)
+      const gitignoreFiltered = rules ? filterByGitignore(withoutAlwaysExcluded, rules, respect) : withoutAlwaysExcluded
+
+      // Apply user removals (none at this point — empty set)
+      const removed = removedPathsRef.current
+      const finalFiltered = filterByRemovedPaths(gitignoreFiltered, removed)
+
+      filteredFilesRef.current = finalFiltered
+
+      // Update filter state for UI
       const rootName = deriveRootName(files)
 
-      const folderManifest: FolderManifest = {
-        transferId,
-        rootName,
-        files: manifestFiles,
+      setFolderFilter({
+        respectGitignore: respect,
+        removedPaths: [],
+        gitignoreRules: rules,
+        filteredFileCount: finalFiltered.length,
+        filteredFiles: finalFiltered,
+        rawFiles: files,
+      })
+
+      // --- Frame preparation: only for the filtered files ---
+      if (finalFiltered.length === 0) {
+        setState((prev) => ({
+          ...prev,
+          state: 'ready',
+          folderManifest: null,
+          frames: [],
+          totalFrames: 0,
+          currentFrameIndex: 0,
+          cyclesCompleted: 0,
+          error: null,
+        }))
+        return
       }
 
-      // Serialize and fragment manifest
-      const manifestBytes = serializeFolderManifest(folderManifest)
-      const maxManifestFragmentSize = Math.min(maxPayload, 800)
-      const manifestFragments = fragmentManifest(manifestBytes, maxManifestFragmentSize)
-
-      // Create manifest frames (v2)
-      const manifestFrames: EncodedFrame[] = manifestFragments.map((frag, i) =>
-        createV2ManifestFrame(transferId, i, manifestFragments.length, frag),
-      )
-
-      // Create data frames (v2) for each file
-      const dataFrames: EncodedFrame[] = []
-      for (const { fileId, chunks: fileChunks } of allChunks) {
-        for (const chunk of fileChunks) {
-          dataFrames.push(
-            createV2DataFrame(transferId, fileId, chunk.index, fileChunks.length, chunk.data),
-          )
-        }
-      }
-
-      const frames = [...manifestFrames, ...dataFrames]
-      framesRef.current = frames
-      currentIndexRef.current = 0
-      cyclesRef.current = 0
-
-      setState((prev) => ({
-        ...prev,
-        state: 'ready',
-        folderManifest,
-        frames,
-        currentFrameIndex: 0,
-        totalFrames: frames.length,
-        cyclesCompleted: 0,
-        error: null,
-      }))
+      // Delegate to the shared preparation function
+      await prepareFolderFrames()
     } catch (err) {
       setState((prev) => ({
         ...prev,
@@ -392,7 +666,7 @@ export function useSender(): UseSenderReturn {
         error: err instanceof Error ? err.message : 'Failed to prepare folder',
       }))
     }
-  }, [buildUserConfig])
+  }, [prepareFolderFrames])
 
   const startTransmission = useCallback(() => {
     if (state.frames.length === 0) return
@@ -560,6 +834,70 @@ export function useSender(): UseSenderReturn {
     setQrVersion(v)
   }, [])
 
+  /**
+   * Toggle whether .gitignore rules are respected.
+   * Re-applies filtering and re-prepares frames.
+   */
+  const setRespectGitignore = useCallback((respect: boolean) => {
+    respectGitignoreRef.current = respect
+
+    // Re-apply filter
+    const filtered = applyFilter()
+
+    if (!filtered || filtered.length === 0) {
+      // No files left after toggling gitignore — update manifest to empty
+      setState((prev) => ({
+        ...prev,
+        folderManifest: null,
+        frames: [],
+        totalFrames: 0,
+      }))
+      return
+    }
+
+    // Re-prepare frames with the new filter
+    prepareFolderFrames()
+  }, [applyFilter, prepareFolderFrames])
+
+  /**
+   * Add or remove a path from the removal set.
+   * If the path is already removed, re-adds it; otherwise removes it.
+   * Re-applies filtering and re-prepares frames.
+   */
+  const toggleRemovePath = useCallback((path: string) => {
+    const current = removedPathsRef.current
+    const updated = new Set(current)
+
+    if (updated.has(path)) {
+      updated.delete(path)
+    } else {
+      updated.add(path)
+    }
+
+    removedPathsRef.current = updated
+
+    setFolderFilter((prev) => ({
+      ...prev,
+      removedPaths: Array.from(updated).sort(),
+    }))
+
+    // Re-apply filter
+    const filtered = applyFilter()
+
+    if (!filtered || filtered.length === 0) {
+      setState((prev) => ({
+        ...prev,
+        folderManifest: null,
+        frames: [],
+        totalFrames: 0,
+      }))
+      return
+    }
+
+    // Re-prepare frames with the new filter
+    prepareFolderFrames()
+  }, [applyFilter, prepareFolderFrames])
+
   // Clean up on unmount
   useEffect(() => {
     return () => clearTimer()
@@ -583,6 +921,9 @@ export function useSender(): UseSenderReturn {
     stopTransmission,
     submitMissingFrames,
     clearRetransmit,
+    folderFilter,
+    setRespectGitignore,
+    toggleRemovePath,
   }
 }
 

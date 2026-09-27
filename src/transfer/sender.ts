@@ -42,6 +42,9 @@ export interface SenderTransfer {
   retransmitFrameCount: number | null
   /** Human-readable description of current retransmit target */
   retransmitLabel: string | null
+  /** Whether frame calculation is in progress. When true, the UI should show a
+   *  local loading indicator on the frame count rather than a full-page spinner. */
+  framesLoading: boolean
 }
 
 export function createSenderState(): SenderTransfer {
@@ -59,6 +62,7 @@ export function createSenderState(): SenderTransfer {
     isFolder: false,
     retransmitFrameCount: null,
     retransmitLabel: null,
+    framesLoading: false,
   }
 }
 
