@@ -107,32 +107,22 @@ describe('parseMissingFrameList', () => {
     expect(result.has('')).toBe(false)
   })
 
-  it('should parse @manifest: in folder mode', () => {
-    const input = '@manifest: 2, 5-7\nsrc/main.go: 1-3, 7'
+  it('should parse @manifest in folder mode (standalone line)', () => {
+    const input = '@manifest\nsrc/main.go: 1-3, 7'
     const result = parseMissingFrameList(input)
-    // @manifest: 2→{1}, 5-7→{4,5,6} combined = {1,4,5,6}
-    expect(sorted(result.get('@manifest')!)).toEqual([1, 4, 5, 6])
+    // @manifest on its own line → key '@manifest' with empty set (all manifest frames)
+    expect(result.get('@manifest')).toBeDefined()
+    expect(result.get('@manifest')!.size).toBe(0)
     expect(sorted(result.get('src/main.go')!)).toEqual([0, 1, 2, 6])
   })
 
-  it('should parse @manifest: with single fragment in folder mode', () => {
-    const result = parseMissingFrameList('@manifest: 1')
-    expect(sorted(result.get('@manifest')!)).toEqual([0])
-  })
-
-  it('should parse @manifest: without ranges as empty set', () => {
-    // If someone writes just @manifest: with no ranges, it's an empty set
+  it('should parse @manifest: with colon in folder mode (gracefully handled)', () => {
     const input = '@manifest:\nsrc/main.go:1-3'
     const result = parseMissingFrameList(input)
-    expect(sorted(result.get('@manifest')!)).toEqual([])
+    // @manifest: with or without colon → treated as manifest request
+    expect(result.get('@manifest')).toBeDefined()
+    expect(result.get('@manifest')!.size).toBe(0)
     expect(sorted(result.get('src/main.go')!)).toEqual([0, 1, 2])
-  })
-
-  it('should reject invalid input combined with @manifest', () => {
-    // Invalid ranges after @manifest should fail
-    const input = '@manifest: abc'
-    const result = parseMissingFrameList(input)
-    expect(result.size).toBe(0)
   })
 
   it('should reject invalid input combined with file mode @manifest', () => {
@@ -141,7 +131,7 @@ describe('parseMissingFrameList', () => {
     expect(result.size).toBe(0)
   })
 
-  it('should handle @manifest as the only item in file mode', () => {
+  it('should handle @manifest as the only item', () => {
     const input = '@manifest'
     const result = parseMissingFrameList(input)
     expect(result.size).toBe(1)
@@ -149,11 +139,12 @@ describe('parseMissingFrameList', () => {
     expect(result.get('')).toBeUndefined()
   })
 
-  it('should handle @manifest alongside folder paths', () => {
-    const input = '@manifest: 1,3\nsrc/config.go: 2,5-6'
+  it('should handle @manifest in folder mode alongside file paths', () => {
+    const input = '@manifest\nsrc/config.go: 2,5-6'
     const result = parseMissingFrameList(input)
     expect(result.size).toBe(2)
-    expect(sorted(result.get('@manifest')!)).toEqual([0, 2])
+    expect(result.get('@manifest')).toBeDefined()
+    expect(result.get('@manifest')!.size).toBe(0)
     expect(sorted(result.get('src/config.go')!)).toEqual([1, 4, 5])
   })
 

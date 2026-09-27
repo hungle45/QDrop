@@ -430,8 +430,7 @@ describe('@manifest retransmission', () => {
     const parsed = parseMissingFrameList(input)
     if (parsed.size === 0) return []
 
-    const manifestFragments = parsed.get('@manifest')
-    const hasManifest = manifestFragments !== undefined
+    const hasManifest = parsed.has('@manifest')
 
     // Build file-id map for remaining entries
     const fileIdByPath = new Map<string, number>()
@@ -447,9 +446,7 @@ describe('@manifest retransmission', () => {
     }
 
     return allFrames.filter((frame) => {
-      if (frame.isManifest && frame.manifestFragmentIndex !== undefined) {
-        return hasManifest && manifestFragments!.has(frame.manifestFragmentIndex)
-      }
+      if (frame.isManifest) return hasManifest
       if (frame.fileId === undefined) return false
       const missing = missingSetByFileId.get(frame.fileId)
       if (!missing) return false
@@ -492,42 +489,33 @@ describe('@manifest retransmission', () => {
   })
 
   describe('folder mode', () => {
-    it('should select specific manifest fragments with @manifest:', () => {
+    it('should select all manifest frames with @manifest', () => {
       const frames = makeFolderFramesWithManifest()
-      const selected = selectFolderMode(frames, '@manifest: 1, 3')
-      // 1→{0}, 3→{2} = fragments at indices 0 and 2
-      expect(selected).toHaveLength(2)
+      const selected = selectFolderMode(frames, '@manifest')
+      expect(selected).toHaveLength(3)
       expect(selected.every((f) => f.isManifest)).toBe(true)
-      expect(selected.map((f) => f.manifestFragmentIndex)).toEqual([0, 2])
     })
 
-    it('should select manifest fragments + file frames', () => {
+    it('should select all manifest frames + file frames', () => {
       const frames = makeFolderFramesWithManifest()
-      const selected = selectFolderMode(frames, '@manifest: 1,3\nsrc/main.go: 1-3,7')
-      // manifest: fragments 0,2
-      // main.go: frames 0,1,2,6
-      expect(selected).toHaveLength(6)
+      const selected = selectFolderMode(frames, '@manifest\nsrc/main.go: 1-3,7')
+      // all 3 manifest frames + main.go: frames 0,1,2,6
+      expect(selected).toHaveLength(7)
       const manifestFrames = selected.filter((f) => f.isManifest)
-      expect(manifestFrames).toHaveLength(2)
-      expect(manifestFrames.map((f) => f.manifestFragmentIndex)).toEqual([0, 2])
+      expect(manifestFrames).toHaveLength(3)
+      expect(manifestFrames.map((f) => f.manifestFragmentIndex)).toEqual([0, 1, 2])
       const dataFrames = selected.filter((f) => !f.isManifest)
       expect(dataFrames).toHaveLength(4)
       expect(dataFrames.every((f) => f.fileId === 0)).toBe(true)
     })
 
-    it('should handle @manifest: with single fragment', () => {
+    it('should handle @manifest alongside file paths', () => {
       const frames = makeFolderFramesWithManifest()
-      const selected = selectFolderMode(frames, '@manifest: 1')
-      expect(selected).toHaveLength(1)
-      expect(selected[0].manifestFragmentIndex).toBe(0)
-    })
-
-    it('should handle overlapping fragment ranges', () => {
-      const frames = makeFolderFramesWithManifest()
-      const selected = selectFolderMode(frames, '@manifest: 1-3, 2-3')
-      // 1-3→{0,1,2}, 2-3→{1,2} = {0,1,2}
-      expect(selected).toHaveLength(3)
-      expect(selected.map((f) => f.manifestFragmentIndex)).toEqual([0, 1, 2])
+      const selected = selectFolderMode(frames, '@manifest\nsrc/config.go: 2,3')
+      expect(selected.filter((f) => f.isManifest)).toHaveLength(3)
+      // config.go frames 2,3 (1-indexed) → indices {1,2} (0-indexed)
+      expect(selected.filter((f) => !f.isManifest)).toHaveLength(2)
+      expect(selected.filter((f) => !f.isManifest).map((f) => f.number)).toEqual([1, 2])
     })
   })
 })

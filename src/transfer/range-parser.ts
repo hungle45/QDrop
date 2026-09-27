@@ -80,15 +80,6 @@ export function parseMissingFrameList(input: string): Map<string, Set<number>> {
     const trimmed = line.trim()
     if (!trimmed) continue
 
-    // Handle @manifest: prefix (folder mode — manifest fragments)
-    if (/^@manifest\s*:/.test(trimmed)) {
-      const ranges = trimmed.replace(/^@manifest\s*:\s*/, '').trim()
-      const frames = ranges ? parseFrameRange(ranges) : new Set<number>()
-      if (ranges && frames.size === 0) return new Map()
-      result.set('@manifest', frames)
-      continue
-    }
-
     // Check for "path:ranges" format
     const colonIndex = trimmed.lastIndexOf(':')
     if (colonIndex === -1) {
@@ -109,7 +100,15 @@ export function parseMissingFrameList(input: string): Map<string, Set<number>> {
     const path = trimmed.slice(0, colonIndex).trim()
     const ranges = trimmed.slice(colonIndex + 1).trim()
 
-    if (!path || !ranges) return new Map()
+    if (!path) return new Map()
+
+    // @manifest as a path means retransmit all manifest frames (in folder mode)
+    if (path === '@manifest') {
+      result.set('@manifest', new Set<number>())
+      continue
+    }
+
+    if (!ranges) return new Map()
 
     const frames = parseFrameRange(ranges)
     if (frames.size === 0) return new Map()

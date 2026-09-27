@@ -466,13 +466,12 @@ export function useSender(): UseSenderReturn {
         hasFileEntries = true
       }
 
-      // Include @manifest fragments if requested
-      const manifestFragments = parsed.get('@manifest')
-      const hasManifest = manifestFragments !== undefined
+      // Include @manifest — select all manifest frames if requested
+      const hasManifest = parsed.has('@manifest')
 
       selected = allFrames.filter((frame) => {
-        if (frame.isManifest && frame.manifestFragmentIndex !== undefined) {
-          return hasManifest && manifestFragments!.has(frame.manifestFragmentIndex)
+        if (frame.isManifest) {
+          return hasManifest
         }
         if (frame.fileId === undefined) return false
         const missing = missingSetByFileId.get(frame.fileId)
@@ -481,7 +480,8 @@ export function useSender(): UseSenderReturn {
       })
 
       if (hasManifest) {
-        labelParts.push(`${manifestFragments!.size} manifest fragment(s)`)
+        const manifestCount = allFrames.filter((f) => f.isManifest).length
+        labelParts.push(`${manifestCount} manifest frame(s)`)
       }
       if (hasFileEntries) {
         const totalRequested = Array.from(missingSetByFileId.values())

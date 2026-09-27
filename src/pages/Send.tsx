@@ -523,7 +523,7 @@ function TransmittingView({
   2, 5-7, @manifest
 
 Folder:
-  @manifest: 2,5-7
+  @manifest
   src/main.go: 1-3,7
   src/config.go: 2,5-6`}
             </div>
@@ -531,7 +531,7 @@ Folder:
           <div className="flex gap-2">
             <textarea
               className="flex-1 min-h-[60px] text-xs font-mono bg-secondary/50 border border-border/50 rounded-md p-2 resize-none focus:outline-none focus:ring-1 focus:ring-primary"
-              placeholder={state.isFolder ? '@manifest: 2,5-7\nsrc/main.go: 1-3,7\nsrc/config.go: 2,5-6' : '2, 5-7, @manifest'}
+              placeholder={state.isFolder ? '@manifest\nsrc/main.go: 1-3,7\nsrc/config.go: 2,5-6' : '2, 5-7, @manifest'}
               value={missingInput}
               onChange={(e) => setMissingInput(e.target.value)}
             />
