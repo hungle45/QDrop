@@ -631,8 +631,6 @@ export function useSender(): UseSenderReturn {
       filteredFilesRef.current = finalFiltered
 
       // Update filter state for UI
-      const rootName = deriveRootName(files)
-
       setFolderFilter({
         respectGitignore: respect,
         removedPaths: [],

@@ -5,7 +5,7 @@
  * correctly after file/folder removals.
  */
 import { describe, it, expect } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render } from '@testing-library/react'
 import { RemovableFileTree } from '../../components/RemovableFileTree'
 import { SenderFolderTree } from '../../components/SenderFolderTree'
 

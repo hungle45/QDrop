@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, Upload, Play, Pause, Square, QrCode, Gauge, Folder as FolderIcon, SendHorizonal, RotateCcw, FilterX, Eye, EyeOff } from 'lucide-react'
+import { ArrowLeft, Upload, Play, Pause, Square, QrCode, Gauge, Folder as FolderIcon, SendHorizonal, RotateCcw, FilterX, EyeOff } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -15,7 +15,6 @@ import { QR_ERROR_LEVELS, QR_VERSION_PRESETS } from '@/qr/generator'
 import type { QrErrorLevel } from '@/qr/generator'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
-import { FileList } from '@/components/FolderTree'
 import { SenderFolderTree } from '@/components/SenderFolderTree'
 import { RemovableFileTree } from '@/components/RemovableFileTree'
 
@@ -324,7 +323,6 @@ function FolderPreparingView({
       }))
     : []
   const removedPathSet = new Set(folderFilter.removedPaths)
-  const removedPathCount = removedPathSet.size
 
   // Estimated minimum transfer time
   const estimatedTime =

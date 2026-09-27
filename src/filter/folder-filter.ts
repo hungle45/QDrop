@@ -5,7 +5,7 @@
  * final file list that should be fed into QR generation.
  */
 
-import { parseGitignore, isIgnored, type GitignoreRule } from './gitignore'
+import { isIgnored, type GitignoreRule } from './gitignore'
 
 /**
  * Always-excluded paths — these are filtered unconditionally,
