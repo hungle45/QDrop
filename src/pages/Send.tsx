@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, Upload, Play, Pause, Square, QrCode, Gauge, Folder as FolderIcon, Copy, SendHorizonal, RotateCcw } from 'lucide-react'
+import { ArrowLeft, Upload, Play, Pause, Square, QrCode, Gauge, Folder as FolderIcon, SendHorizonal, RotateCcw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -14,8 +14,7 @@ import { useSender, FRAME_INTERVALS } from '@/hooks/use-sender'
 import { QR_ERROR_LEVELS, QR_VERSION_PRESETS } from '@/qr/generator'
 import type { QrErrorLevel } from '@/qr/generator'
 import { FileList } from '@/components/FolderTree'
-import { formatDisplayMissingFrames, formatMissingFrameList, computeMissingFramesFile, computeMissingFramesFolder } from '@/transfer/range-parser'
-import type { FileProgress } from '@/transfer/receiver'
+
 
 function formatSize(bytes: number): string {
   if (bytes === 0) return '0 B'

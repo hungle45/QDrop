@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react'
+import { useState, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ArrowLeft, Camera, ScanLine, Download, RotateCcw, CheckCircle2, XCircle, LoaderCircle, Copy, Check } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import { Separator } from '@/components/ui/separator'
 import { useReceiver } from '@/hooks/use-receiver'
-import type { Manifest, FolderManifest } from '@/protocol'
+import type { Manifest } from '@/protocol'
 import type { ReceiverTransfer, FileProgress } from '@/transfer/receiver'
 import { FolderTree } from '@/components/FolderTree'
 import {
@@ -403,14 +403,14 @@ function MissingFramesFile({
   receivedFrames: Map<number, Uint8Array>
   totalFrames: number
 }) {
-  const { missingSet, displayText, copyText, hasMissing } = useMemo(() => {
+  const { displayText, copyText, hasMissing } = useMemo(() => {
     const missing = computeMissingFramesFile(receivedFrames, totalFrames)
     if (missing.size === 0) {
-      return { missingSet: missing, displayText: '', copyText: '', hasMissing: false }
+      return { displayText: '', copyText: '', hasMissing: false }
     }
     const copyText = formatMissingFrameList(new Map([['', missing]]))
     const displayText = formatDisplayMissingFrames(new Map([['', missing]]))
-    return { missingSet: missing, displayText, copyText, hasMissing: true }
+    return { displayText, copyText, hasMissing: true }
   }, [receivedFrames, totalFrames])
 
   const [copied, setCopied] = useState(false)
@@ -459,14 +459,14 @@ function MissingFramesFolder({
 }: {
   fileProgress: Map<number, FileProgress>
 }) {
-  const { missingFiles, displayText, copyText, hasMissing } = useMemo(() => {
+  const { displayText, copyText, hasMissing } = useMemo(() => {
     const missing = computeMissingFramesFolder(fileProgress)
     if (missing.size === 0) {
-      return { missingFiles: missing, displayText: '', copyText: '', hasMissing: false }
+      return { displayText: '', copyText: '', hasMissing: false }
     }
     const copyText = formatMissingFrameList(missing)
     const displayText = formatDisplayMissingFrames(missing)
-    return { missingFiles: missing, displayText, copyText, hasMissing: true }
+    return { displayText, copyText, hasMissing: true }
   }, [fileProgress])
 
   const [copied, setCopied] = useState(false)

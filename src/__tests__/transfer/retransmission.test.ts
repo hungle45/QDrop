@@ -246,8 +246,6 @@ describe('Full cycle: parse → format roundtrip', () => {
     for (const [path, frames] of parsed) {
       lines.push(`${path}:${formatFrameRanges(frames)}`)
     }
-    const formatted = lines.join('\n')
-    // Sort might differ, so compare sets
     expect(parsed.get('src/main.go')).toBeDefined()
     expect(parsed.get('src/config.go')).toBeDefined()
     expect(formatFrameRanges(parsed.get('src/main.go')!)).toBe('1-3,7')
