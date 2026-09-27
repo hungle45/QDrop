@@ -295,26 +295,17 @@ function ScanningView({
 }
 
 function CompleteView({ state }: { state: ReceiverTransfer }) {
-  const handleDownload = useCallback(() => {
+  const handleDownload = useCallback(async () => {
     if (state.outputFiles && state.outputFiles.size > 0 && state.folderManifest) {
-      // Folder transfer: download all files sequentially with a small delay
-      // to prevent browser throttling of multiple downloads
-      const entries = Array.from(state.outputFiles.entries())
-      let i = 0
-      const doNext = () => {
-        if (i >= entries.length) return
-        const [path, blob] = entries[i]
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        // Preserve structure by replacing / with _ in filename
-        a.download = `${state.folderManifest!.rootName}_${path.replace(/\//g, '_')}`
-        a.click()
-        URL.revokeObjectURL(url)
-        i++
-        setTimeout(doNext, 500)
-      }
-      doNext()
+      // Folder transfer: create a single ZIP with the original folder structure
+      const { createFolderZip } = await import('@/transfer/receiver')
+      const zipBlob = await createFolderZip(state.folderManifest.rootName, state.outputFiles)
+      const url = URL.createObjectURL(zipBlob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${state.folderManifest.rootName}.zip`
+      a.click()
+      URL.revokeObjectURL(url)
       return
     }
 
@@ -363,7 +354,7 @@ function CompleteView({ state }: { state: ReceiverTransfer }) {
           </div>
           <Button className="gap-2 mt-2" onClick={handleDownload}>
             <Download className="size-4" />
-            {isFolder ? 'Download Files' : 'Download File'}
+            {isFolder ? 'Download ZIP' : 'Download File'}
           </Button>
         </CardContent>
       </Card>

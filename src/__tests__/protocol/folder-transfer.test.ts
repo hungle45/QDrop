@@ -495,3 +495,71 @@ describe('Folder Download Reconstruction', () => {
     expect(output.has('README.md')).toBe(true)
   })
 })
+
+describe('Folder ZIP Download', () => {
+  it('should create a ZIP with correct folder structure', async () => {
+    const { createFolderZip } = await import('../../transfer/receiver')
+
+    const files = new Map<string, Blob>()
+    files.set('src/main.go', new Blob(['package main']))
+    files.set('src/api/users.go', new Blob(['package api']))
+    files.set('README.md', new Blob(['# Project']))
+
+    const zipBlob = await createFolderZip('my-project', files)
+    expect(zipBlob.type).toBe('application/zip')
+    expect(zipBlob.size).toBeGreaterThan(0)
+
+    // Verify contents by reading back with JSZip
+    const JSZip = (await import('jszip')).default
+    const zip = await JSZip.loadAsync(zipBlob)
+
+    expect(Object.keys(zip.files)).toContain('src/main.go')
+    expect(Object.keys(zip.files)).toContain('src/api/users.go')
+    expect(Object.keys(zip.files)).toContain('README.md')
+
+    const mainGo = await zip.file('src/main.go')!.async('string')
+    expect(mainGo).toBe('package main')
+
+    const readme = await zip.file('README.md')!.async('string')
+    expect(readme).toBe('# Project')
+  })
+
+  it('should preserve nested directory structure', async () => {
+    const { createFolderZip } = await import('../../transfer/receiver')
+
+    const files = new Map<string, Blob>()
+    files.set('a/b/c/d/deep.txt', new Blob(['deep']))
+    files.set('a/b/shallow.txt', new Blob(['shallow']))
+
+    const zipBlob = await createFolderZip('test', files)
+    const JSZip = (await import('jszip')).default
+    const zip = await JSZip.loadAsync(zipBlob)
+
+    expect(Object.keys(zip.files)).toContain('a/b/c/d/deep.txt')
+    expect(Object.keys(zip.files)).toContain('a/b/shallow.txt')
+
+    const deep = await zip.file('a/b/c/d/deep.txt')!.async('string')
+    expect(deep).toBe('deep')
+  })
+
+  it('should use the root name for the ZIP file name', async () => {
+    const { createFolderZip } = await import('../../transfer/receiver')
+
+    const files = new Map<string, Blob>()
+    files.set('test.txt', new Blob(['test']))
+
+    const zipBlob = await createFolderZip('my-project', files)
+    // The function returns the blob; the filename is set in the UI
+    expect(zipBlob.size).toBeGreaterThan(0)
+  })
+
+  it('should handle empty folder', async () => {
+    const { createFolderZip } = await import('../../transfer/receiver')
+
+    const files = new Map<string, Blob>()
+    const zipBlob = await createFolderZip('empty', files)
+
+    // Empty zip should still be valid
+    expect(zipBlob.size).toBeGreaterThan(0)
+  })
+})

@@ -4,6 +4,7 @@
  */
 
 import { type Manifest, type FolderManifest, type DataFrame } from '@/protocol'
+import JSZip from 'jszip'
 
 export type ReceiverState =
   | 'idle'
@@ -213,4 +214,24 @@ export function reconstructFolderFiles(
   }
 
   return outputFiles
+}
+
+/**
+ * Create a single ZIP blob from reconstructed folder files.
+ * Preserves the original relative paths inside the archive.
+ */
+export async function createFolderZip(
+  rootName: string,
+  files: Map<string, Blob>,
+): Promise<Blob> {
+  void rootName // used as a hint for ZIP name; actual paths come from map keys
+  const zip = new JSZip()
+
+  for (const [relativePath, blob] of files) {
+    const arrayBuffer = await blob.arrayBuffer()
+    zip.file(relativePath, arrayBuffer)
+  }
+
+  const zipBlob = await zip.generateAsync({ type: 'blob' })
+  return zipBlob
 }
