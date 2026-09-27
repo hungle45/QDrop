@@ -42,7 +42,6 @@ export default function Send() {
     state,
     displayCells,
     density,
-    setDensity,
     frameInterval,
     setFrameInterval,
     qrConfig,
@@ -105,7 +104,8 @@ export default function Send() {
         <div className="flex-1" />
       </Header>
 
-      <div className="flex-1 p-4 sm:p-6 lg:p-8 max-w-3xl mx-auto w-full">
+      <div className="flex-1 flex flex-col items-center overflow-y-auto">
+        <div className="mt-auto mb-auto w-full max-w-3xl p-4 sm:p-6 lg:p-8">
         {state.state === 'idle' && (
           <FileSelector
             dragOver={dragOver}
@@ -129,8 +129,6 @@ export default function Send() {
               onStart={startTransmission}
               onRespectGitignoreChange={setRespectGitignore}
               onToggleRemovePath={toggleRemovePath}
-              density={density}
-              onDensityChange={setDensity}
               frameInterval={frameInterval}
               onFrameIntervalChange={setFrameInterval}
               qrConfig={qrConfig}
@@ -142,8 +140,6 @@ export default function Send() {
               file={state.file!}
               manifest={state.manifest}
               onStart={startTransmission}
-              density={density}
-              onDensityChange={setDensity}
               frameInterval={frameInterval}
               onFrameIntervalChange={setFrameInterval}
               qrConfig={qrConfig}
@@ -184,6 +180,7 @@ export default function Send() {
           />
         )}
       </div>
+    </div>
     </div>
   )
 }
@@ -281,8 +278,6 @@ function FolderPreparingView({
   onStart,
   onRespectGitignoreChange,
   onToggleRemovePath,
-  density,
-  onDensityChange,
   frameInterval,
   onFrameIntervalChange,
   qrConfig,
@@ -295,8 +290,6 @@ function FolderPreparingView({
   onStart: () => void
   onRespectGitignoreChange: (respect: boolean) => void
   onToggleRemovePath: (path: string) => void
-  density: QrDensity
-  onDensityChange: (d: QrDensity) => void
   frameInterval: number
   onFrameIntervalChange: (ms: number) => void
   qrConfig: { errorCorrectionLevel: QrErrorLevel; version?: number }
@@ -446,11 +439,6 @@ function FolderPreparingView({
             onFrameIntervalChange={onFrameIntervalChange}
           />
 
-          <QrDensityControl
-            density={density}
-            onDensityChange={onDensityChange}
-          />
-
           <QrConfigControl
             config={qrConfig}
             onErrorLevelChange={onQrErrorLevelChange}
@@ -471,8 +459,6 @@ function PreparingView({
   file,
   manifest,
   onStart,
-  density,
-  onDensityChange,
   frameInterval,
   onFrameIntervalChange,
   qrConfig,
@@ -482,8 +468,6 @@ function PreparingView({
   file: File
   manifest: Manifest | null
   onStart: () => void
-  density: QrDensity
-  onDensityChange: (d: QrDensity) => void
   frameInterval: number
   onFrameIntervalChange: (ms: number) => void
   qrConfig: { errorCorrectionLevel: QrErrorLevel; version?: number }
@@ -520,11 +504,6 @@ function PreparingView({
           <SpeedControl
             frameInterval={frameInterval}
             onFrameIntervalChange={onFrameIntervalChange}
-          />
-
-          <QrDensityControl
-            density={density}
-            onDensityChange={onDensityChange}
           />
 
           <QrConfigControl
@@ -891,34 +870,6 @@ function SpeedControl({
   )
 }
 
-function QrDensityControl({
-  density,
-  onDensityChange,
-}: {
-  density: QrDensity
-  onDensityChange: (d: QrDensity) => void
-}) {
-  return (
-    <div className="space-y-3">
-      <p className="text-sm font-medium text-foreground">QR Density</p>
-      <ToggleGroup
-        type="single"
-        value={String(density)}
-        onValueChange={(v) => {
-          if (v) onDensityChange(Number(v) as QrDensity)
-        }}
-        className="flex gap-1"
-      >
-        <ToggleGroupItem value="1" size="sm" className="text-xs px-3">
-          1 × 1
-        </ToggleGroupItem>
-        <ToggleGroupItem value="2" size="sm" className="text-xs px-3">
-          2 × 2
-        </ToggleGroupItem>
-      </ToggleGroup>
-    </div>
-  )
-}
 
 function QrConfigControl({
   config,
@@ -952,6 +903,9 @@ function QrConfigControl({
         <p className="text-[10px] text-muted-foreground">
           {QR_ERROR_LEVELS.find((l) => l.value === config.errorCorrectionLevel)?.recovery} recovery
         </p>
+        <p className="text-[10px] text-muted-foreground/70 leading-relaxed">
+          Higher error correction makes the QR more resilient to damage or scanning issues, but reduces the amount of data that can fit in each QR code.
+        </p>
       </div>
 
       <div className="space-y-2">
@@ -971,6 +925,9 @@ function QrConfigControl({
             </ToggleGroupItem>
           ))}
         </ToggleGroup>
+        <p className="text-[10px] text-muted-foreground/70 leading-relaxed">
+          Higher versions can carry more data per QR code and reduce transfer time, but larger QR codes may be harder for the camera to recognize.
+        </p>
       </div>
     </div>
   )

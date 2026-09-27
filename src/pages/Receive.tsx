@@ -44,7 +44,8 @@ export default function Receive() {
         )}
       </header>
 
-      <div className="flex-1 p-4 sm:p-6 lg:p-8 max-w-3xl mx-auto w-full">
+      <div className="flex-1 flex flex-col items-center overflow-y-auto">
+        <div className="mt-auto mb-auto w-full max-w-3xl p-4 sm:p-6 lg:p-8">
         {state.state === 'idle' && <IdleView onStart={startReceiving} />}
 
         {(state.state === 'camera_permission' || state.state === 'scanning' || state.state === 'receiving') && (
@@ -63,6 +64,7 @@ export default function Receive() {
 
         {state.state === 'failed' && <FailedView error={state.error} onRetry={retry} />}
       </div>
+    </div>
     </div>
   )
 }
