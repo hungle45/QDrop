@@ -28,7 +28,7 @@ export const MANIFEST_QR_CONFIG: QrGenConfig = {
 /** Default config for data frames */
 export const DEFAULT_QR_CONFIG: QrGenConfig = {
   errorCorrectionLevel: 'L',
-  version: 20,
+  version: 15,
   width: 256,
   margin: 4,
 }

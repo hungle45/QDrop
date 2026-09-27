@@ -69,7 +69,7 @@ export function useSender(): UseSenderReturn {
   const [density, setDensity] = useState<QrDensity>(1)
   const [frameInterval, setFrameIntervalState] = useState<number>(DEFAULT_FRAME_INTERVAL)
   const [qrErrorLevel, setQrErrorLevel] = useState<QrErrorLevel>('L')
-  const [qrVersion, setQrVersion] = useState<number | undefined>(20)
+  const [qrVersion, setQrVersion] = useState<number | undefined>(15)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const currentIndexRef = useRef(0)
   const cyclesRef = useRef(0)
