@@ -156,13 +156,19 @@ export function useSender(): UseSenderReturn {
     prevConfigRef.current = { errorLevel: qrErrorLevel, version: qrVersion }
 
     if (prev.errorLevel === qrErrorLevel && prev.version === qrVersion) return
-    if (selectedFileRef.current && !selectedFilesRef.current &&
-        state.state !== 'idle' && state.state !== 'preparing' &&
-        state.state !== 'transmitting' && state.state !== 'paused') {
-      const doRegen = async () => {
-        const config = buildUserConfig()
-        setState((prev) => ({ ...prev, state: 'preparing' as SenderState }))
-        try {
+    if (prev.errorLevel === qrErrorLevel && prev.version === qrVersion) return
+
+    const isFileMode = !!selectedFileRef.current && !selectedFilesRef.current
+    const isFolderMode = !!selectedFilesRef.current && !selectedFileRef.current
+    if (!isFileMode && !isFolderMode) return
+    if (state.state === 'idle' || state.state === 'preparing') return
+    if (state.state === 'transmitting' || state.state === 'paused') return
+
+    const doRegen = async () => {
+      const config = buildUserConfig()
+      setState((prev) => ({ ...prev, state: 'preparing' as SenderState }))
+      try {
+        if (isFileMode) {
           const maxPayload = estimateMaxPayloadBytes(config)
           const chunks = await chunkFile(selectedFileRef.current!, maxPayload)
           const transferId = crypto.getRandomValues(new Uint8Array(16))
@@ -193,12 +199,55 @@ export function useSender(): UseSenderReturn {
             cyclesCompleted: 0,
             error: null,
           }))
-        } catch {
-          setState((prev) => ({ ...prev, state: 'ready' as SenderState }))
+        } else {
+          const maxPayload = estimateMaxPayloadBytes(config)
+          const transferId = crypto.getRandomValues(new Uint8Array(16))
+          let fileIdCounter = 0
+          const manifestFiles: ManifestFileEntry[] = []
+          const allChunks: { fileId: number; chunks: { index: number; data: Uint8Array }[]; file: File }[] = []
+          for (const file of selectedFilesRef.current!) {
+            const fileId = fileIdCounter++
+            const chunks = await chunkFile(file, maxPayload)
+            const fileHash = await sha256(file)
+            const relPath = (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name
+            if (!isPathSafe(relPath)) throw new Error(`Unsafe path: ${relPath}`)
+            manifestFiles.push({ fileId, path: relPath, size: file.size, frameCount: chunks.length, sha256: fileHash })
+            allChunks.push({ fileId, chunks, file })
+          }
+          const rootName = deriveRootName(selectedFilesRef.current!)
+          const folderManifest: FolderManifest = { transferId, rootName, files: manifestFiles }
+          const manifestBytes = serializeFolderManifest(folderManifest)
+          const maxManifestFragmentSize = Math.min(maxPayload, 800)
+          const manifestFragments = fragmentManifest(manifestBytes, maxManifestFragmentSize)
+          const manifestFrames: EncodedFrame[] = manifestFragments.map((frag, i) =>
+            createV2ManifestFrame(transferId, i, manifestFragments.length, frag),
+          )
+          const dataFrames: EncodedFrame[] = []
+          for (const { fileId, chunks: fileChunks } of allChunks) {
+            for (const chunk of fileChunks) {
+              dataFrames.push(createV2DataFrame(transferId, fileId, chunk.index, fileChunks.length, chunk.data))
+            }
+          }
+          const frames = [...manifestFrames, ...dataFrames]
+          framesRef.current = frames
+          currentIndexRef.current = 0
+          cyclesRef.current = 0
+          setState((prev) => ({
+            ...prev,
+            state: 'ready',
+            folderManifest,
+            frames,
+            currentFrameIndex: 0,
+            totalFrames: frames.length,
+            cyclesCompleted: 0,
+            error: null,
+          }))
         }
+      } catch {
+        setState((prev) => ({ ...prev, state: 'ready' as SenderState }))
       }
-      doRegen()
     }
+    doRegen()
   }, [qrErrorLevel, qrVersion, buildUserConfig, state.state])
 
   const selectFile = useCallback(async (file: File) => {
@@ -413,7 +462,13 @@ export function useSender(): UseSenderReturn {
 
 function deriveRootName(files: File[]): string {
   if (files.length === 0) return 'folder'
-  const firstPath = (files[0] as File & { webkitRelativePath?: string }).webkitRelativePath
+  // Skip hidden/system files like .DS_Store when deriving root name
+  const firstRealFile = files.find(f => {
+    const relPath = (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name
+    return !relPath.startsWith('.') && !relPath.includes('/.')
+  })
+  const target = firstRealFile || files[0]
+  const firstPath = (target as File & { webkitRelativePath?: string }).webkitRelativePath
   if (firstPath) {
     const topDir = firstPath.split('/')[0]
     if (topDir) return topDir

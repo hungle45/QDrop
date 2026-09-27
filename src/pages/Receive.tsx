@@ -297,17 +297,24 @@ function ScanningView({
 function CompleteView({ state }: { state: ReceiverTransfer }) {
   const handleDownload = useCallback(() => {
     if (state.outputFiles && state.outputFiles.size > 0 && state.folderManifest) {
-      // Folder transfer: download individual files
-      // First, try to download as a folder structure by creating a simple HTML-based download
-      // For simplicity, download each file individually
-      state.outputFiles.forEach((blob, path) => {
+      // Folder transfer: download all files sequentially with a small delay
+      // to prevent browser throttling of multiple downloads
+      const entries = Array.from(state.outputFiles.entries())
+      let i = 0
+      const doNext = () => {
+        if (i >= entries.length) return
+        const [path, blob] = entries[i]
         const url = URL.createObjectURL(blob)
         const a = document.createElement('a')
         a.href = url
-        a.download = path.replace('/', '_')
+        // Preserve structure by replacing / with _ in filename
+        a.download = `${state.folderManifest!.rootName}_${path.replace(/\//g, '_')}`
         a.click()
         URL.revokeObjectURL(url)
-      })
+        i++
+        setTimeout(doNext, 500)
+      }
+      doNext()
       return
     }
 

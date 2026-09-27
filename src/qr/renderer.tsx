@@ -32,7 +32,7 @@ export function QrRenderer({ cells, density, className }: QrRendererProps) {
     <div className={cn('grid gap-2', gridCols, className)}>
       {cells.map((cell) => (
         <div
-          key={cell.frame.number}
+          key={cell.frame.number + '-' + (cell.frame.fileId ?? 0)}
           className="flex flex-col items-center gap-1"
         >
           <img
@@ -42,12 +42,32 @@ export function QrRenderer({ cells, density, className }: QrRendererProps) {
             draggable={false}
           />
           <span className="text-[10px] text-muted-foreground font-mono">
-            #{cell.frame.number}
+            {frameLabel(cell.frame)}
           </span>
         </div>
       ))}
     </div>
   )
+}
+
+/**
+ * Build a human-readable label for a frame, showing file context.
+ */
+function frameLabel(frame: EncodedFrame): string {
+  if (frame.isManifest && frame.manifestTotalFrames !== undefined) {
+    const idx = frame.manifestFragmentIndex ?? frame.number
+    return `Manifest ${idx + 1}/${frame.manifestTotalFrames}`
+  }
+  if (frame.isManifest) {
+    return 'Manifest'
+  }
+  if (frame.fileId !== undefined && frame.totalFrames !== undefined) {
+    return `File ${frame.fileId} · ${frame.number + 1}/${frame.totalFrames}`
+  }
+  if (frame.fileId !== undefined) {
+    return `File ${frame.fileId} · #${frame.number}`
+  }
+  return `#${frame.number}`
 }
 
 /**

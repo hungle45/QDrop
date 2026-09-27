@@ -392,3 +392,106 @@ describe('Per-File Frame Tracking', () => {
   })
 })
 
+
+describe('Pre-Manifest Frame Buffering', () => {
+  it('should count frames buffered before manifest arrives', () => {
+    const fileProgress = new Map<number, FileProgress>()
+    const fileData = new Map<number, Map<number, Uint8Array>>()
+
+    // Simulate frames arriving before manifest
+    const f0Frames = new Map<number, Uint8Array>()
+    f0Frames.set(0, new Uint8Array([1]))
+    f0Frames.set(1, new Uint8Array([2]))
+    f0Frames.set(2, new Uint8Array([3]))
+    fileData.set(0, f0Frames)
+
+    // Now manifest arrives with proper metadata
+    const bufferedKeys = fileData.get(0)
+    const received = bufferedKeys ? new Set(bufferedKeys.keys()) : new Set<number>()
+    fileProgress.set(0, {
+      fileId: 0,
+      path: 'src/main.go',
+      size: 100,
+      frameCount: 3,
+      sha256: new Uint8Array(32).fill(1),
+      receivedFrames: received,
+      verified: false,
+    })
+
+    expect(fileProgress.get(0)!.receivedFrames.size).toBe(3)
+    expect(isFileComplete(fileProgress.get(0)!)).toBe(true)
+  })
+
+  it('should reconcile multiple files buffered before manifest', () => {
+    const fileProgress = new Map<number, FileProgress>()
+    const fileData = new Map<number, Map<number, Uint8Array>>()
+
+    // File 0: 2 of 3 frames arrived before manifest
+    const f0 = new Map<number, Uint8Array>()
+    f0.set(0, new Uint8Array([1]))
+    f0.set(2, new Uint8Array([3]))
+    fileData.set(0, f0)
+
+    // File 1: 1 of 1 frames arrived before manifest
+    const f1 = new Map<number, Uint8Array>()
+    f1.set(0, new Uint8Array([4]))
+    fileData.set(1, f1)
+
+    // Reconcile as manifest would do
+    const entries = [
+      { fileId: 0, path: 'a.txt', frameCount: 3 },
+      { fileId: 1, path: 'b.txt', frameCount: 1 },
+    ]
+    for (const entry of entries) {
+      const existing = fileData.get(entry.fileId)
+      const received = existing ? new Set(existing.keys()) : new Set<number>()
+      fileProgress.set(entry.fileId, {
+        fileId: entry.fileId,
+        path: entry.path,
+        size: 100,
+        frameCount: entry.frameCount,
+        sha256: new Uint8Array(32),
+        receivedFrames: received,
+        verified: false,
+      })
+    }
+
+    expect(isFileComplete(fileProgress.get(1)!)).toBe(true) // 1/1 complete
+    expect(isFileComplete(fileProgress.get(0)!)).toBe(false) // 2/3 incomplete
+
+    // Remaining frame arrives
+    fileProgress.get(0)!.receivedFrames = new Set([0, 1, 2])
+    expect(isFolderTransferComplete(fileProgress)).toBe(true)
+  })
+})
+
+describe('Folder Download Reconstruction', () => {
+  it('should reconstruct all files in the folder', () => {
+    const fileProgress = new Map<number, FileProgress>()
+    const fileData = new Map<number, Map<number, Uint8Array>>()
+
+    fileProgress.set(0, {
+      fileId: 0, path: 'src/main.go', size: 3, frameCount: 1,
+      sha256: new Uint8Array(32), receivedFrames: new Set([0]), verified: false,
+    })
+    fileProgress.set(1, {
+      fileId: 1, path: 'src/api/users.go', size: 3, frameCount: 1,
+      sha256: new Uint8Array(32), receivedFrames: new Set([0]), verified: false,
+    })
+    fileProgress.set(2, {
+      fileId: 2, path: 'README.md', size: 5, frameCount: 1,
+      sha256: new Uint8Array(32), receivedFrames: new Set([0]), verified: false,
+    })
+
+    const f0 = new Map<number, Uint8Array>(); f0.set(0, new Uint8Array([1,2,3]))
+    const f1 = new Map<number, Uint8Array>(); f1.set(0, new Uint8Array([4,5,6]))
+    const f2 = new Map<number, Uint8Array>(); f2.set(0, new Uint8Array([72,101,108,108,111]))
+    fileData.set(0, f0); fileData.set(1, f1); fileData.set(2, f2)
+
+    const output = reconstructFolderFiles(fileProgress, fileData)
+    expect(output.size).toBe(3)
+    expect(output.has('src/main.go')).toBe(true)
+    expect(output.has('src/api/users.go')).toBe(true)
+    expect(output.has('README.md')).toBe(true)
+  })
+})

@@ -21,6 +21,8 @@ export interface EncodedFrame {
   isManifest: boolean
   /** For v2 data frames: the file_id this payload belongs to */
   fileId?: number
+  /** For v2 data frames: total frames for this file */
+  totalFrames?: number
   /** For v2 manifest frames: the fragment index */
   manifestFragmentIndex?: number
   /** Total manifest fragments (for v2) */
@@ -140,6 +142,7 @@ export function createV2DataFrame(
     number: frameNumber,
     isManifest: false,
     fileId,
+    totalFrames,
   }
 }
 

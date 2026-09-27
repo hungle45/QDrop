@@ -93,25 +93,35 @@ export function useReceiver(): UseReceiverReturn {
         const fileData = new Map(prev.fileData)
 
         if (folderManifest && !prev.folderManifest) {
-          // Build initial per-file progress tracking
+          // Build per-file progress tracking, reconciling with pre-manifest buffered frames
           for (const file of folderManifest.files) {
             if (!isPathSafe(file.path)) continue
+
+            // Check if we already buffered frames for this file before the manifest arrived
+            const existingFrames = prev.fileData.get(file.fileId)
+            const received = existingFrames
+              ? new Set(existingFrames.keys())
+              : new Set<number>()
+
             fileProgress.set(file.fileId, {
               fileId: file.fileId,
               path: file.path,
               size: file.size,
               frameCount: file.frameCount,
               sha256: file.sha256,
-              receivedFrames: new Set(),
+              receivedFrames: received,
               verified: false,
             })
-            fileData.set(file.fileId, new Map())
+
+            // Preserve existing buffered data; create fresh map only if none
+            if (!existingFrames) {
+              fileData.set(file.fileId, new Map())
+            }
           }
 
           newState = prev.state === 'scanning' ? 'receiving' : prev.state
-
-          // Check if there's any buffered data for these files
-          // (Data frames received before the manifest was complete)
+        } else {
+          // Manifest not yet complete — keep any pre-manifest buffered data untouched
         }
 
         return {
