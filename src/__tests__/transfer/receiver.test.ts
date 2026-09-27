@@ -8,6 +8,7 @@ function makeDataFrame(frameNumber: number, totalFrames: number, payload: Uint8A
     version: 1,
     transferId: new Uint8Array(16).fill(1),
     frameType: 1,
+    fileIdOrManifestFrag: 0,
     frameNumber,
     totalFrames,
     payloadLength: payload.length,
@@ -49,6 +50,7 @@ describe('Receiver', () => {
         version: 1,
         transferId: new Uint8Array(16).fill(1),
         frameType: 0,
+        fileIdOrManifestFrag: 0,
         frameNumber: 0,
         totalFrames: 5,
         payloadLength: 3,
@@ -98,7 +100,13 @@ describe('Receiver', () => {
         invalidCount: 0,
         error: null as string | null,
         blob: null as Blob | null,
-        frameLog: [],
+        frameLog: [] as never[],
+        folderManifest: null,
+        fileProgress: new Map(),
+        fileData: new Map(),
+        outputFiles: new Map(),
+        manifestFragments: new Map(),
+        manifestTotalFragments: 0,
       }
 
       const blob = reconstructFile(state)
@@ -125,7 +133,13 @@ describe('Receiver', () => {
         invalidCount: 0,
         error: null as string | null,
         blob: null as Blob | null,
-        frameLog: [],
+        frameLog: [] as never[],
+        folderManifest: null,
+        fileProgress: new Map(),
+        fileData: new Map(),
+        outputFiles: new Map(),
+        manifestFragments: new Map(),
+        manifestTotalFragments: 0,
       }
 
       const blob = reconstructFile(state)

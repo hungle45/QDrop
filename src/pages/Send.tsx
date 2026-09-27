@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, Upload, Play, Pause, Square, QrCode, Gauge } from 'lucide-react'
+import { ArrowLeft, Upload, Play, Pause, Square, QrCode, Gauge, Folder as FolderIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -8,11 +8,12 @@ import { Separator } from '@/components/ui/separator'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { Slider } from '@/components/ui/slider'
 import { bytesToHex } from '@/protocol'
-import type { Manifest } from '@/protocol'
+import type { Manifest, FolderManifest } from '@/protocol'
 import { QrRenderer, type QrDensity, type QrGridCell } from '@/qr/renderer'
 import { useSender, FRAME_INTERVALS } from '@/hooks/use-sender'
 import { QR_ERROR_LEVELS, QR_VERSION_PRESETS } from '@/qr/generator'
 import type { QrErrorLevel } from '@/qr/generator'
+import { FileList } from '@/components/FolderTree'
 
 function formatSize(bytes: number): string {
   if (bytes === 0) return '0 B'
@@ -35,6 +36,7 @@ export default function Send() {
     setQrErrorLevel,
     setQrVersion,
     selectFile,
+    selectFolder,
     startTransmission,
     pauseTransmission,
     resumeTransmission,
@@ -49,6 +51,12 @@ export default function Send() {
     await selectFile(file)
   }
 
+  const handleFolder = async (files: FileList | null) => {
+    if (!files || files.length === 0) return
+    const fileArray = Array.from(files)
+    await selectFolder(fileArray)
+  }
+
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault()
     setDragOver(false)
@@ -59,6 +67,10 @@ export default function Send() {
   const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (file) handleFile(file)
+  }
+
+  const handleFolderInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    handleFolder(e.target.files)
   }
 
   const isTransmitting = state.state === 'transmitting'
@@ -83,30 +95,40 @@ export default function Send() {
             onDragLeave={() => setDragOver(false)}
             onDrop={handleDrop}
             onFileInput={handleFileInput}
+            onFolderInput={handleFolderInput}
             onFileSelect={() => document.getElementById('file-input')?.click()}
+            onFolderSelect={() => document.getElementById('folder-input')?.click()}
             fileInputKey={fileInputKey}
           />
         )}
 
         {(state.state === 'preparing' || state.state === 'ready') && !isActive && (
-          <PreparingView
-            file={state.file!}
-            manifest={state.manifest}
-            onStart={startTransmission}
-            density={density}
-            onDensityChange={setDensity}
-            frameInterval={frameInterval}
-            onFrameIntervalChange={setFrameInterval}
-            qrConfig={qrConfig}
-            onQrErrorLevelChange={setQrErrorLevel}
-            onQrVersionChange={setQrVersion}
-          />
+          state.isFolder ? (
+            <FolderPreparingView
+              folderManifest={state.folderManifest}
+              onStart={startTransmission}
+            />
+          ) : (
+            <PreparingView
+              file={state.file!}
+              manifest={state.manifest}
+              onStart={startTransmission}
+              density={density}
+              onDensityChange={setDensity}
+              frameInterval={frameInterval}
+              onFrameIntervalChange={setFrameInterval}
+              qrConfig={qrConfig}
+              onQrErrorLevelChange={setQrErrorLevel}
+              onQrVersionChange={setQrVersion}
+            />
+          )
         )}
 
         {isActive && (
           <TransmittingView
             state={state}
             manifest={state.manifest}
+            folderManifest={state.folderManifest}
             displayCells={displayCells}
             density={density}
             frameInterval={frameInterval}
@@ -149,7 +171,9 @@ function FileSelector({
   onDragLeave,
   onDrop,
   onFileInput,
+  onFolderInput,
   onFileSelect,
+  onFolderSelect,
   fileInputKey,
 }: {
   dragOver: boolean
@@ -157,7 +181,9 @@ function FileSelector({
   onDragLeave: () => void
   onDrop: (e: React.DragEvent) => void
   onFileInput: (e: React.ChangeEvent<HTMLInputElement>) => void
+  onFolderInput: (e: React.ChangeEvent<HTMLInputElement>) => void
   onFileSelect: () => void
+  onFolderSelect: () => void
   fileInputKey: number
 }) {
   return (
@@ -169,9 +195,8 @@ function FileSelector({
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
         onDrop={onDrop}
-        onClick={onFileSelect}
       >
-        <CardContent className="pt-16 pb-16 flex flex-col items-center gap-4">
+        <CardContent className="pt-12 pb-12 flex flex-col items-center gap-4">
           <div className="size-12 rounded-full bg-secondary flex items-center justify-center">
             <Upload className="size-5 text-muted-foreground" />
           </div>
@@ -180,8 +205,17 @@ function FileSelector({
               Drop a file here
             </p>
             <p className="text-xs text-muted-foreground">
-              or click to select
+              or select a file or folder
             </p>
+          </div>
+          <div className="flex gap-2">
+            <Button variant="default" size="sm" onClick={onFileSelect}>
+              Select File
+            </Button>
+            <Button variant="outline" size="sm" className="gap-2" onClick={onFolderSelect}>
+              <FolderIcon className="size-3.5" />
+              Select Folder
+            </Button>
           </div>
           <input
             key={fileInputKey}
@@ -190,6 +224,86 @@ function FileSelector({
             className="hidden"
             onChange={onFileInput}
           />
+          <input
+            key={`folder-${fileInputKey}`}
+            id="folder-input"
+            type="file"
+            className="hidden"
+            // @ts-expect-error - webkitdirectory is a non-standard attribute
+            webkitdirectory=""
+            directory=""
+            onChange={onFolderInput}
+          />
+          <p className="text-[10px] text-muted-foreground">
+            Folder selection uses webkitdirectory (Chrome/Edge/Safari).
+          </p>
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
+function FolderPreparingView({
+  folderManifest,
+  onStart,
+}: {
+  folderManifest: FolderManifest | null
+  onStart: () => void
+}) {
+  if (!folderManifest) {
+    return (
+      <div className="flex items-center justify-center h-48 text-sm text-muted-foreground">
+        Preparing folder...
+      </div>
+    )
+  }
+
+  const totalFrames = folderManifest.files.reduce((sum, f) => sum + f.frameCount, 0)
+  const totalSize = folderManifest.files.reduce((sum, f) => sum + f.size, 0)
+
+  const fileList = folderManifest.files.map(f => ({
+    path: f.path,
+    size: f.size,
+    frameCount: f.frameCount,
+  }))
+
+  return (
+    <div className="space-y-6 pt-8">
+      <Card>
+        <CardContent className="pt-6 pb-6 space-y-4">
+          <div className="flex items-center gap-3">
+            <div className="size-10 rounded-lg bg-secondary flex items-center justify-center">
+              <FolderIcon className="size-5 text-foreground" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-foreground truncate">
+                {folderManifest.rootName}/
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {folderManifest.files.length} files &middot; {formatSize(totalSize)} &middot; {totalFrames} frames
+              </p>
+            </div>
+          </div>
+
+          <Separator />
+
+          <FileList rootName={folderManifest.rootName} files={fileList} />
+
+          <Separator />
+
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+            <span className="text-muted-foreground">Files</span>
+            <span className="font-mono text-foreground">{folderManifest.files.length}</span>
+            <span className="text-muted-foreground">Total Size</span>
+            <span className="font-mono text-foreground">{formatSize(totalSize)}</span>
+            <span className="text-muted-foreground">Total Frames</span>
+            <span className="font-mono text-foreground">{totalFrames}</span>
+          </div>
+
+          <Button className="w-full gap-2" onClick={onStart}>
+            <Play className="size-4" />
+            Start Transmission
+          </Button>
         </CardContent>
       </Card>
     </div>
@@ -275,6 +389,7 @@ function PreparingView({
 function TransmittingView({
   state,
   manifest,
+  folderManifest,
   displayCells,
   density,
   frameInterval,
@@ -287,8 +402,9 @@ function TransmittingView({
   onQrScaleChange,
   qrConfig,
 }: {
-  state: { totalFrames: number; cyclesCompleted: number; file: File | null }
+  state: { totalFrames: number; cyclesCompleted: number; file: File | null; files: File[] | null; isFolder: boolean }
   manifest: Manifest | null
+  folderManifest: FolderManifest | null
   displayCells: QrGridCell[]
   density: QrDensity
   frameInterval: number
@@ -307,12 +423,25 @@ function TransmittingView({
         <CardContent className="pt-4 pb-4">
           <div className="flex items-center gap-3">
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-foreground truncate">
-                {state.file?.name ?? 'Unknown'}
-              </p>
-              <p className="text-xs text-muted-foreground">
-                {state.file ? formatSize(state.file.size) : ''}
-              </p>
+              {state.isFolder && folderManifest ? (
+                <>
+                  <p className="text-sm font-medium text-foreground truncate">
+                    {folderManifest.rootName}/
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {folderManifest.files.length} files &middot; {state.totalFrames} frames
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm font-medium text-foreground truncate">
+                    {state.file?.name ?? 'Unknown'}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {state.file ? formatSize(state.file.size) : ''}
+                  </p>
+                </>
+              )}
             </div>
             <Badge variant={isPaused ? 'secondary' : 'default'}>
               {isPaused ? 'Paused' : 'Transmitting'}

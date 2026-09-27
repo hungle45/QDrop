@@ -1,16 +1,21 @@
 /**
  * Custom hook for the receiver state machine.
+ * Supports both single-file (Phase 1) and folder (Phase 2) transfers.
  */
 
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { decodeQrData } from '@/protocol'
 import { sha256, equalBytes } from '@/protocol'
+import { reconstructFolderManifest } from '@/protocol/manifest-v2'
+import { isPathSafe } from '@/protocol/manifest-v2'
 import {
   type ReceiverTransfer,
   type ReceiverState,
   isDuplicateFrame,
   isTransferComplete,
+  isFolderTransferComplete,
   reconstructFile,
+  reconstructFolderFiles,
   addToLog,
 } from '@/transfer/receiver'
 import { startCamera, stopCamera, getImageDataFromVideo, scanImageData, type ScanResult } from '@/qr/scanner'
@@ -47,6 +52,7 @@ export function useReceiver(): UseReceiverReturn {
       return
     }
 
+    // v1 manifest (single-file)
     if (decoded.type === 'manifest') {
       setTransfer((prev) => {
         if (prev.manifest) return prev
@@ -69,13 +75,70 @@ export function useReceiver(): UseReceiverReturn {
       return
     }
 
+    // v2 manifest fragment (folder)
+    if (decoded.type === 'manifest-v2') {
+      setTransfer((prev) => {
+        // Ignore duplicate manifest fragments
+        if (prev.manifestFragments.has(decoded.manifestFragmentIndex)) return prev
+
+        const updatedFragments = new Map(prev.manifestFragments)
+        updatedFragments.set(decoded.manifestFragmentIndex, decoded.fragmentPayload)
+        const totalFragments = decoded.manifestTotalFrames
+
+        // Try to reconstruct the manifest
+        const folderManifest = reconstructFolderManifest(updatedFragments, totalFragments)
+
+        let newState = prev.state
+        const fileProgress = new Map(prev.fileProgress)
+        const fileData = new Map(prev.fileData)
+
+        if (folderManifest && !prev.folderManifest) {
+          // Build initial per-file progress tracking
+          for (const file of folderManifest.files) {
+            if (!isPathSafe(file.path)) continue
+            fileProgress.set(file.fileId, {
+              fileId: file.fileId,
+              path: file.path,
+              size: file.size,
+              frameCount: file.frameCount,
+              sha256: file.sha256,
+              receivedFrames: new Set(),
+              verified: false,
+            })
+            fileData.set(file.fileId, new Map())
+          }
+
+          newState = prev.state === 'scanning' ? 'receiving' : prev.state
+
+          // Check if there's any buffered data for these files
+          // (Data frames received before the manifest was complete)
+        }
+
+        return {
+          ...prev,
+          folderManifest: folderManifest || prev.folderManifest,
+          manifestFragments: updatedFragments,
+          manifestTotalFragments: totalFragments,
+          fileProgress,
+          fileData,
+          state: newState as ReceiverState,
+          frameLog: addToLog(prev.frameLog, {
+            frameNumber: decoded.manifestFragmentIndex,
+            type: 'manifest-fragment',
+            message: `manifest fragment ${decoded.manifestFragmentIndex + 1}/${totalFragments} received` +
+              (folderManifest ? ' — manifest complete!' : ''),
+            time: Date.now(),
+          }),
+        }
+      })
+      return
+    }
+
+    // v1 data frame
     if (decoded.type === 'data') {
       setTransfer((prev) => {
         if (isDuplicateFrame(prev.receivedFrames, decoded.frame)) {
-          return {
-            ...prev,
-            duplicateCount: prev.duplicateCount + 1,
-          }
+          return { ...prev, duplicateCount: prev.duplicateCount + 1 }
         }
 
         const updated = new Map(prev.receivedFrames)
@@ -96,6 +159,73 @@ export function useReceiver(): UseReceiverReturn {
           }),
         }
       })
+      return
+    }
+
+    // v2 data frame (with file_id)
+    if (decoded.type === 'data-v2') {
+      setTransfer((prev) => {
+        const { fileId, fileFrameNumber, fileTotalFrames } = decoded
+
+        // Track the frame per-file
+        const fileProgress = new Map(prev.fileProgress)
+        const fileData = new Map(prev.fileData)
+
+        // Get or create progress for this file
+        let progress = fileProgress.get(fileId)
+        if (!progress) {
+          // File not yet known from manifest — this can happen if data arrives before manifest
+          // Buffer it temporarily with whatever info we have
+          progress = {
+            fileId,
+            path: `file-${fileId}`,
+            size: 0,
+            frameCount: fileTotalFrames,
+            sha256: new Uint8Array(32),
+            receivedFrames: new Set(),
+            verified: false,
+          }
+          fileProgress.set(fileId, progress)
+        }
+
+        // Check duplicate per-file
+        if (progress.receivedFrames.has(fileFrameNumber)) {
+          return { ...prev, duplicateCount: prev.duplicateCount + 1 }
+        }
+
+        // Store the frame data
+        let fileFrames = fileData.get(fileId)
+        if (!fileFrames) {
+          fileFrames = new Map()
+          fileData.set(fileId, fileFrames)
+        }
+        fileFrames.set(fileFrameNumber, decoded.frame.payload)
+
+        // Update progress
+        progress.receivedFrames = new Set(progress.receivedFrames)
+        progress.receivedFrames.add(fileFrameNumber)
+
+        const hasFolderManifest = !!prev.folderManifest
+        const isFolderComplete = hasFolderManifest && isFolderTransferComplete(fileProgress)
+
+        const newState = isFolderComplete
+          ? 'reconstructing' as ReceiverState
+          : (hasFolderManifest ? 'receiving' as ReceiverState : prev.state)
+
+        return {
+          ...prev,
+          fileProgress,
+          fileData,
+          state: newState,
+          frameLog: addToLog(prev.frameLog, {
+            frameNumber: fileFrameNumber,
+            type: 'new',
+            message: `file #${fileId} frame ${fileFrameNumber}/${fileTotalFrames}` +
+              (isFolderComplete ? ' — folder complete!' : ''),
+            time: Date.now(),
+          }),
+        }
+      })
     }
   }, [])
 
@@ -109,6 +239,81 @@ export function useReceiver(): UseReceiverReturn {
     const doReconstruction = async () => {
       setTransfer((prev) => ({ ...prev, state: 'verifying' as ReceiverState }))
 
+      // Folder transfer
+      if (transfer.folderManifest) {
+        const outputFiles = reconstructFolderFiles(transfer.fileProgress, transfer.fileData)
+
+        if (outputFiles.size === 0) {
+          setTransfer((prev) => ({
+            ...prev,
+            state: 'failed' as ReceiverState,
+            error: 'Failed to reconstruct folder from received frames',
+          }))
+          return
+        }
+
+        // Verify each file's SHA-256
+        const verifiedFiles = new Map<string, Blob>()
+
+        for (const [path, blob] of outputFiles) {
+          const fileEntry = transfer.folderManifest.files.find(f =>
+            f.path === path && isPathSafe(f.path),
+          )
+          if (!fileEntry) {
+            continue
+          }
+          const hash = await sha256(blob)
+          if (!equalBytes(hash, fileEntry.sha256)) {
+            // Update progress error
+            const progress = new Map(transfer.fileProgress)
+            const p = progress.get(fileEntry.fileId)
+            if (p) {
+              p.error = 'SHA-256 mismatch'
+              progress.set(fileEntry.fileId, p)
+            }
+            setTransfer((prev) => ({ ...prev, fileProgress: progress }))
+            continue
+          }
+          verifiedFiles.set(path, blob)
+
+          // Mark as verified
+          const progress = new Map(transfer.fileProgress)
+          const p = progress.get(fileEntry.fileId)
+          if (p) {
+            p.verified = true
+            progress.set(fileEntry.fileId, p)
+          }
+          setTransfer((prev) => ({ ...prev, fileProgress: progress }))
+        }
+
+        if (verifiedFiles.size === 0) {
+          setTransfer((prev) => ({
+            ...prev,
+            state: 'failed' as ReceiverState,
+            error: 'SHA-256 verification failed — data corrupted',
+          }))
+          return
+        }
+
+        setTransfer((prev) => ({
+          ...prev,
+          state: 'complete' as ReceiverState,
+          outputFiles: verifiedFiles,
+        }))
+
+        // Stop scanning
+        if (scanIntervalRef.current) {
+          clearInterval(scanIntervalRef.current)
+          scanIntervalRef.current = null
+        }
+        if (streamRef.current) {
+          stopCamera(streamRef.current)
+          streamRef.current = null
+        }
+        return
+      }
+
+      // Single-file transfer
       const blob = reconstructFile(transfer)
       if (!blob) {
         setTransfer((prev) => ({
@@ -213,14 +418,7 @@ export function useReceiver(): UseReceiverReturn {
           case 'OverconstrainedError':
             message = 'Camera does not support the required resolution.'
             break
-          case 'AbortError':
-            message = 'Camera access was aborted.'
-            break
-          default:
-            message = `Camera error: ${err.message}`
         }
-      } else if (err instanceof Error) {
-        message = err.message
       }
 
       setTransfer((prev) => ({
@@ -229,7 +427,7 @@ export function useReceiver(): UseReceiverReturn {
         error: message,
       }))
     }
-  }, [processScanResult])
+  }, [])
 
   const stopReceiving = useCallback(() => {
     if (scanIntervalRef.current) {
@@ -260,12 +458,18 @@ function createInitialState(state: ReceiverState = 'idle'): ReceiverTransfer {
   return {
     state,
     manifest: null,
+    folderManifest: null,
     receivedFrames: new Map(),
+    fileProgress: new Map(),
+    fileData: new Map(),
     totalFrames: 0,
     duplicateCount: 0,
     invalidCount: 0,
     error: null,
     blob: null,
+    outputFiles: new Map(),
     frameLog: [],
+    manifestFragments: new Map(),
+    manifestTotalFragments: 0,
   }
 }

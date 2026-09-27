@@ -2,18 +2,19 @@ import { describe, it, expect } from 'vitest'
 import { encodeFrame, decodeFrame, frameToDataString, dataStringToFrame } from '../../protocol/frame'
 import { crc32 } from '../../protocol/crc'
 import {
-  MAGIC, PROTOCOL_VERSION,
+  MAGIC, PROTOCOL_VERSION_V1,
   FRAME_TYPE_MANIFEST, FRAME_TYPE_DATA,
-  HEADER_SIZE,
+  HEADER_SIZE_V1,
   type EncodeHeader,
 } from '../../protocol/types'
 
 function makeTestHeader(overrides: Partial<EncodeHeader> = {}): EncodeHeader {
   return {
     magic: MAGIC,
-    version: PROTOCOL_VERSION,
+    version: PROTOCOL_VERSION_V1,
     transferId: new Uint8Array(16).fill(42),
     frameType: FRAME_TYPE_DATA,
+    fileIdOrManifestFrag: 0,
     frameNumber: 1,
     totalFrames: 10,
     payloadLength: 0,
@@ -26,14 +27,14 @@ describe('Frame encoding/decoding', () => {
     const payload = new Uint8Array([1, 2, 3, 4, 5])
     const header = makeTestHeader({ payloadLength: payload.length })
     const bytes = encodeFrame(header, payload)
-    expect(bytes.length).toBe(HEADER_SIZE + payload.length)
+    expect(bytes.length).toBe(HEADER_SIZE_V1 + payload.length)
 
     const decoded = decodeFrame(bytes)
     expect(decoded).not.toBeNull()
     if (!decoded) return
 
     expect(decoded.header.magic).toBe(MAGIC)
-    expect(decoded.header.version).toBe(PROTOCOL_VERSION)
+    expect(decoded.header.version).toBe(PROTOCOL_VERSION_V1)
     expect(decoded.header.frameType).toBe(FRAME_TYPE_DATA)
     expect(decoded.header.frameNumber).toBe(1)
     expect(decoded.header.totalFrames).toBe(10)
@@ -74,7 +75,7 @@ describe('Frame encoding/decoding', () => {
     const header = makeTestHeader({ payloadLength: payload.length })
     const bytes = encodeFrame(header, payload)
     // Corrupt a byte in the payload area (which is before CRC)
-    bytes[HEADER_SIZE] = 0xFF
+    bytes[HEADER_SIZE_V1] = 0xFF
     const result = decodeFrame(bytes)
     expect(result).toBeNull()
   })

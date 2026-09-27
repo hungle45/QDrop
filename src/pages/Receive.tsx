@@ -9,6 +9,7 @@ import { Separator } from '@/components/ui/separator'
 import { useReceiver } from '@/hooks/use-receiver'
 import type { Manifest } from '@/protocol'
 import type { ReceiverTransfer } from '@/transfer/receiver'
+import { FolderTree } from '@/components/FolderTree'
 
 function formatSize(bytes: number): string {
   if (bytes === 0) return '0 B'
@@ -106,7 +107,10 @@ function ScanningView({
   state: ReceiverTransfer
   videoRef: React.RefObject<HTMLVideoElement | null>
 }) {
-  const progress = state.totalFrames > 0
+  const isV1 = !!state.manifest
+  const isV2 = !!state.folderManifest
+
+  const progress = isV1 && state.totalFrames > 0
     ? Math.round((state.receivedFrames.size / state.totalFrames) * 100)
     : 0
 
@@ -147,75 +151,107 @@ function ScanningView({
         </div>
       </Card>
 
-      <Card>
-        <CardContent className="pt-4 pb-4 space-y-3">
-          {state.manifest ? (
-            <>
-              <div className="flex items-center gap-3">
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-foreground truncate">
-                    {state.manifest.filename}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {formatSize(state.manifest.fileSize)} &middot; {state.totalFrames} frames
-                  </p>
-                </div>
+      {isV2 && state.folderManifest ? (
+        <Card>
+          <CardContent className="pt-4 pb-4 space-y-3">
+            <FolderTree
+              rootName={state.folderManifest.rootName}
+              fileProgress={state.fileProgress}
+            />
+            <Separator />
+            <div className="grid grid-cols-3 gap-2 text-xs">
+              <div>
+                <span className="text-muted-foreground">Duplicates</span>
+                <p className="font-mono text-foreground">{state.duplicateCount}</p>
               </div>
-
-              <div className="space-y-1">
-                <div className="flex justify-between text-xs">
-                  <span className="text-muted-foreground">
-                    {state.receivedFrames.size} / {state.totalFrames} frames
-                  </span>
-                  <span className="font-mono text-foreground">{progress}%</span>
-                </div>
-                <Progress value={progress} />
+              <div>
+                <span className="text-muted-foreground">Invalid</span>
+                <p className="font-mono text-foreground">{state.invalidCount}</p>
               </div>
-
-              <Separator />
-
-              <div className="grid grid-cols-3 gap-2 text-xs">
-                <div>
-                  <span className="text-muted-foreground">Received</span>
-                  <p className="font-mono text-foreground">{state.receivedFrames.size}</p>
-                </div>
-                <div>
-                  <span className="text-muted-foreground">Duplicates</span>
-                  <p className="font-mono text-foreground">{state.duplicateCount}</p>
-                </div>
-                <div>
-                  <span className="text-muted-foreground">Invalid</span>
-                  <p className="font-mono text-foreground">{state.invalidCount}</p>
-                </div>
+              <div>
+                <span className="text-muted-foreground">Files</span>
+                <p className="font-mono text-foreground">{state.folderManifest.files.length}</p>
               </div>
-            </>
-          ) : (
-            <>
-              <div className="flex items-center gap-2">
-                <ScanLine className="size-4 animate-pulse text-primary" />
+            </div>
+            {state.manifestFragments.size > 0 && state.manifestTotalFragments > 0 && (
+              <>
+                <Separator />
+                <div className="text-xs text-muted-foreground">
+                  Manifest: {state.manifestFragments.size}/{state.manifestTotalFragments} fragments
+                </div>
+              </>
+            )}
+          </CardContent>
+        </Card>
+      ) : isV1 ? (
+        <Card>
+          <CardContent className="pt-4 pb-4 space-y-3">
+            <div className="flex items-center gap-3">
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-foreground truncate">
+                  {state.manifest!.filename}
+                </p>
                 <p className="text-xs text-muted-foreground">
-                  Scanning for QR codes...
+                  {formatSize(state.manifest!.fileSize)} &middot; {state.totalFrames} frames
                 </p>
               </div>
-              <Separator />
-              <div className="grid grid-cols-3 gap-2 text-xs">
-                <div>
-                  <span className="text-muted-foreground">Received</span>
-                  <p className="font-mono text-foreground">0</p>
-                </div>
-                <div>
-                  <span className="text-muted-foreground">Duplicates</span>
-                  <p className="font-mono text-foreground">0</p>
-                </div>
-                <div>
-                  <span className="text-muted-foreground">Invalid</span>
-                  <p className="font-mono text-foreground">0</p>
-                </div>
+            </div>
+
+            <div className="space-y-1">
+              <div className="flex justify-between text-xs">
+                <span className="text-muted-foreground">
+                  {state.receivedFrames.size} / {state.totalFrames} frames
+                </span>
+                <span className="font-mono text-foreground">{progress}%</span>
               </div>
-            </>
-          )}
-        </CardContent>
-      </Card>
+              <Progress value={progress} />
+            </div>
+
+            <Separator />
+
+            <div className="grid grid-cols-3 gap-2 text-xs">
+              <div>
+                <span className="text-muted-foreground">Received</span>
+                <p className="font-mono text-foreground">{state.receivedFrames.size}</p>
+              </div>
+              <div>
+                <span className="text-muted-foreground">Duplicates</span>
+                <p className="font-mono text-foreground">{state.duplicateCount}</p>
+              </div>
+              <div>
+                <span className="text-muted-foreground">Invalid</span>
+                <p className="font-mono text-foreground">{state.invalidCount}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      ) : (
+        <Card>
+          <CardContent className="pt-4 pb-4 space-y-3">
+            <div className="flex items-center gap-2">
+              <ScanLine className="size-4 animate-pulse text-primary" />
+              <p className="text-xs text-muted-foreground">
+                Scanning for QR codes...
+              </p>
+            </div>
+            <Separator />
+            <div className="grid grid-cols-3 gap-2 text-xs">
+              <div>
+                <span className="text-muted-foreground">Received</span>
+                <p className="font-mono text-foreground">0</p>
+              </div>
+              <div>
+                <span className="text-muted-foreground">Duplicates</span>
+                <p className="font-mono text-foreground">0</p>
+              </div>
+              <div>
+                <span className="text-muted-foreground">Invalid</span>
+                <p className="font-mono text-foreground">0</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {state.manifest && !isScanning && (
         <Card>
@@ -260,6 +296,21 @@ function ScanningView({
 
 function CompleteView({ state }: { state: ReceiverTransfer }) {
   const handleDownload = useCallback(() => {
+    if (state.outputFiles && state.outputFiles.size > 0 && state.folderManifest) {
+      // Folder transfer: download individual files
+      // First, try to download as a folder structure by creating a simple HTML-based download
+      // For simplicity, download each file individually
+      state.outputFiles.forEach((blob, path) => {
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = path.replace('/', '_')
+        a.click()
+        URL.revokeObjectURL(url)
+      })
+      return
+    }
+
     if (!state.blob || !state.manifest) return
     const url = URL.createObjectURL(state.blob)
     const a = document.createElement('a')
@@ -267,7 +318,10 @@ function CompleteView({ state }: { state: ReceiverTransfer }) {
     a.download = state.manifest.filename
     a.click()
     URL.revokeObjectURL(url)
-  }, [state.blob, state.manifest])
+  }, [state.blob, state.manifest, state.outputFiles, state.folderManifest])
+
+  const isFolder = state.folderManifest !== null
+  const fileCount = state.outputFiles?.size ?? 1
 
   return (
     <div className="flex-1 flex items-center justify-center">
@@ -278,9 +332,18 @@ function CompleteView({ state }: { state: ReceiverTransfer }) {
           </div>
           <div className="text-center space-y-1">
             <p className="text-lg font-medium text-foreground">
-              Transfer Complete
+              {isFolder ? 'Folder Received' : 'Transfer Complete'}
             </p>
-            {state.manifest && (
+            {isFolder && state.folderManifest ? (
+              <>
+                <p className="text-sm font-medium text-foreground truncate max-w-full">
+                  {state.folderManifest.rootName}/
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {fileCount} files
+                </p>
+              </>
+            ) : state.manifest ? (
               <>
                 <p className="text-sm font-medium text-foreground truncate max-w-full">
                   {state.manifest.filename}
@@ -289,11 +352,11 @@ function CompleteView({ state }: { state: ReceiverTransfer }) {
                   {formatSize(state.manifest.fileSize)}
                 </p>
               </>
-            )}
+            ) : null}
           </div>
           <Button className="gap-2 mt-2" onClick={handleDownload}>
             <Download className="size-4" />
-            Download File
+            {isFolder ? 'Download Files' : 'Download File'}
           </Button>
         </CardContent>
       </Card>
