@@ -14,7 +14,7 @@ export default defineConfig({
       '@': resolve(__dirname, './src'),
     },
   },
-  base: '/QDrop/',
+  base: process.env.VITE_BASE_URL || '/qdrop/',
   test: {
     environment: 'happy-dom',
     setupFiles: [],
