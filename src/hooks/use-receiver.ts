@@ -121,6 +121,9 @@ export function useReceiver(): UseReceiverReturn {
 
           newState = prev.state === 'scanning' ? 'receiving' : prev.state
         } else {
+          if (isFolderTransferComplete(fileProgress)) {
+            newState = 'reconstructing'
+          }
           // Manifest not yet complete — keep any pre-manifest buffered data untouched
         }
 
@@ -236,7 +239,7 @@ export function useReceiver(): UseReceiverReturn {
           frameLog: addToLog(prev.frameLog, {
             frameNumber: fileFrameNumber,
             type: 'new',
-            message: `file #${fileId} frame ${fileFrameNumber}/${fileTotalFrames}` +
+            message: `file #${fileId} frame ${fileFrameNumber + 1}/${fileTotalFrames}` +
               (isFolderComplete ? ' — folder complete!' : ''),
             time: Date.now(),
           }),

@@ -238,15 +238,15 @@ function ScanningView({
             <div className="grid grid-cols-3 gap-2 text-xs">
               <div>
                 <span className="text-muted-foreground">Received</span>
-                <p className="font-mono text-foreground">0</p>
+                <p className="font-mono text-foreground">{state.receivedFrames.size + state.fileProgress.size}</p>
               </div>
               <div>
                 <span className="text-muted-foreground">Duplicates</span>
-                <p className="font-mono text-foreground">0</p>
+                <p className="font-mono text-foreground">{state.duplicateCount}</p>
               </div>
               <div>
                 <span className="text-muted-foreground">Invalid</span>
-                <p className="font-mono text-foreground">0</p>
+                <p className="font-mono text-foreground">{state.invalidCount}</p>
               </div>
             </div>
           </CardContent>
