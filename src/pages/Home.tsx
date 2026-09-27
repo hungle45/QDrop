@@ -14,7 +14,7 @@ export default function Home() {
             QDrop
           </h1>
           <p className="text-xl text-muted-foreground max-w-md mx-auto leading-relaxed">
-            AirDrop, without the network.
+            File transfer, through QR codes.
           </p>
         </div>
 
