@@ -192,7 +192,24 @@ npm run lint
 npm run preview
 ```
 
-The development server runs at `http://localhost:5173/QDrop/`.
+The development server runs at `http://localhost:5173/qdrop/`.
+
+## Docker
+
+Build and run the production image with a single command:
+
+```bash
+# Build and run on default port 8080
+make docker-run
+
+# Custom port
+make docker-run PORT=3000
+
+# Or using docker-compose directly
+docker compose up -d
+```
+
+App runs at `http://localhost:<PORT>/`.
 
 ## Deployment (GitHub Pages)
 
@@ -200,7 +217,7 @@ This project is configured for automatic deployment to GitHub Pages.
 
 1. Push to the `main` branch.
 2. The GitHub Actions workflow builds and deploys automatically.
-3. The app will be available at `https://<username>.github.io/QDrop/`.
+3. The app will be available at `https://<username>.github.io/qdrop/`.
 
 ### Manual deployment
 
@@ -211,7 +228,8 @@ npm run build
 
 ### Configuration
 
-- Vite's `base` is set to `/QDrop/` in `vite.config.ts`
+- Vite's `base` defaults to `/qdrop/` in `vite.config.ts`, overridable via `VITE_BASE_URL`
+- Docker builds override the base to `/` via `VITE_BASE_URL=/`
 - React Router uses `import.meta.env.BASE_URL` as the basename
 - The build command also copies `dist/index.html` to `dist/404.html` for SPA routing
 - GitHub Actions workflow: `.github/workflows/deploy.yml`
