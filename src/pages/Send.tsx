@@ -13,7 +13,7 @@ import { QrRenderer, type QrDensity, type QrGridCell } from '@/qr/renderer'
 import { useSender, FRAME_INTERVALS } from '@/hooks/use-sender'
 import { QR_ERROR_LEVELS, QR_VERSION_PRESETS } from '@/qr/generator'
 import type { QrErrorLevel } from '@/qr/generator'
-import { FileList } from '@/components/FolderTree'
+import { FileList, SenderFolderTree } from '@/components/FolderTree'
 
 
 function formatSize(bytes: number): string {
@@ -614,6 +614,33 @@ Folder:
           </p>
         </CardContent>
       </Card>
+
+      {state.isFolder && folderManifest && displayCells.length > 0 && (
+        <Card>
+          <CardContent className="pt-3 pb-3">
+            <SenderFolderTree
+              rootName={folderManifest.rootName}
+              files={folderManifest.files.map((f) => ({
+                fileId: f.fileId,
+                path: f.path,
+                size: f.size,
+                frameCount: f.frameCount,
+              }))}
+              activeFileId={
+                displayCells[0]?.frame.isManifest
+                  ? undefined
+                  : displayCells[0]?.frame.fileId
+              }
+              currentFrameNumber={
+                displayCells[0]?.frame.isManifest
+                  ? undefined
+                  : displayCells[0]?.frame.number
+              }
+              className="max-h-48"
+            />
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardContent className="pt-3 pb-3 flex items-center justify-center gap-4">
